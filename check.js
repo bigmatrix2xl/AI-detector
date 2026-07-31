@@ -16,7 +16,25 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const ENGINE = process.env.AI_DETECTOR_DIR || path.join(__dirname, 'AI-detector');
+// Движок ищем сначала рядом со скриптом (check.js лежит в корне репозитория),
+// потом в подпапке AI-detector, потом по переменной окружения.
+function findEngine() {
+  const tries = [
+    process.env.AI_DETECTOR_DIR,
+    __dirname,
+    path.join(__dirname, 'AI-detector'),
+    path.join(process.cwd(), 'AI-detector'),
+    process.cwd()
+  ].filter(Boolean);
+  for (const dir of tries) {
+    if (fs.existsSync(path.join(dir, 'js', 'kb.js'))) return dir;
+  }
+  console.error('Не нашёл движок детектора (js/kb.js). Положите check.js в корень\n' +
+                'репозитория AI-detector или задайте AI_DETECTOR_DIR=/путь/к/AI-detector');
+  process.exit(1);
+}
+
+const ENGINE = findEngine();
 const kb = require(path.join(ENGINE, 'js', 'kb.js'));
 const det = require(path.join(ENGINE, 'js', 'detector.js'));
 
