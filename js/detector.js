@@ -109,11 +109,15 @@
   // Из "играет ключевую роль" делаем регэксп, терпимый к окончаниям слов.
   function phraseToRegex(p, flexTail) {
     var words = p.split(/\s+/);
+    var single = words.length === 1;
     var parts = words.map(function (w) {
       var esc;
       if (/[а-яё]/i.test(w) && w.length >= 5) {
         var cut = w.length >= 7 ? 2 : 1;
-        esc = escapeRe(w.slice(0, w.length - cut)) + '[а-яё]{0,' + (cut + (flexTail || 2)) + '}';
+        // Для однословных фраз хвост не длиннее отрезанного окончания:
+        // иначе «производится» ловит «производителей», «внедрение» — «внедрению» и т.п.
+        var tail = single ? cut : cut + (flexTail || 2);
+        esc = escapeRe(w.slice(0, w.length - cut)) + '[а-яё]{0,' + tail + '}';
       } else if (/^[a-z]+$/i.test(w) && w.length >= 5) {
         esc = escapeRe(w) + '[a-z]{0,2}';
       } else {
