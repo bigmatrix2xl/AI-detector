@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Детектор — локальная проверка текста на ИИ</title>
+<meta name="description" content="Локальный детектор ИИ-текста: анализ штампов, ритма, канцелярита. Работает в браузере, без серверов и подписок.">
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕵️</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <div class="brand">
+      <span class="brand-mark">🕵️</span>
+      <div>
+        <h1>AI Детектор</h1>
+        <p>Локальная проверка текста на ИИ-следы · работает офлайн, данные не покидают компьютер</p>
+      </div>
+    </div>
+    <button id="theme-btn" class="btn ghost" type="button">◐ Авто</button>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ВВОД -->
+  <section class="card" id="input-section">
+    <div class="card-head">
+      <h2>Текст для проверки</h2>
+      <div class="btn-row">
+        <button class="btn ghost sm" id="sample-ai" type="button">Пример: ИИ-текст</button>
+        <button class="btn ghost sm" id="sample-human" type="button">Пример: живой текст</button>
+      </div>
+    </div>
+
+    <div id="drop-zone" class="drop-zone">
+      <textarea id="input-text" placeholder="Вставьте текст любого объёма — статью, лендинг, карточку товара…&#10;&#10;Или перетащите сюда файл: DOCX, PDF, ODT, TXT, MD, HTML, RTF, CSV." spellcheck="false"></textarea>
+      <div class="input-foot">
+        <span id="counter" class="muted">0 симв. · 0 слов</span>
+        <label class="btn ghost sm file-btn">📎 Прикрепить файл
+          <input type="file" id="file-input" accept=".docx,.pdf,.odt,.txt,.md,.markdown,.html,.htm,.rtf,.csv,.tsv,.json" hidden>
+        </label>
+      </div>
+    </div>
+
+    <p id="note" class="note" hidden></p>
+
+    <!-- НАСТРОЙКИ -->
+    <details class="settings">
+      <summary>⚙️ Настройки анализа</summary>
+      <div class="settings-grid">
+        <fieldset>
+          <legend>Профиль чувствительности</legend>
+          <label><input type="radio" name="profile" value="strict"> <b>Строгий</b> — ловит всё подозрительное; как самые придирчивые детекторы. Для важных публикаций.</label>
+          <label><input type="radio" name="profile" value="balanced" checked> <b>Сбалансированный</b> — рекомендуемый режим.</label>
+          <label><input type="radio" name="profile" value="soft"> <b>Мягкий</b> — только явные признаки; меньше ложных срабатываний на сухих экспертных текстах.</label>
+        </fieldset>
+        <div class="settings-col">
+          <label class="row-lab">Язык текста
+            <select id="set-lang">
+              <option value="auto" selected>Автоопределение</option>
+              <option value="ru">Русский</option>
+              <option value="en">Английский</option>
+            </select>
+          </label>
+          <label class="row-lab">Размер сегмента, симв.
+            <input type="number" id="set-seg" min="400" max="4000" step="100" value="900">
+          </label>
+          <label class="check-lab"><input type="checkbox" id="set-md"> Списки и заголовки задуманы автором (Markdown) — не считать структуру ИИ-признаком</label>
+          <label class="row-lab">Фразы-исключения (не считать штампами), через запятую или с новой строки
+            <textarea id="set-wl" rows="2" placeholder="например: комплексный подход"></textarea>
+          </label>
+        </div>
+      </div>
+      <div class="info-box">
+        <b>Почему у разных детекторов разные результаты?</b> Все детекторы — вероятностные: GigaCheck смотрит одни признаки, ZeroGPT — другие, поэтому один текст получает разные вердикты. Этот инструмент детерминированный: одинаковый текст с одинаковыми настройками всегда даёт один и тот же результат. «Плавающие» оценки у внешних сервисов имитируются профилем чувствительности: проверьте текст в «Строгом» — если и он говорит «человек», текст с большим запасом пройдёт большинство детекторов.
+      </div>
+    </details>
+
+    <div class="btn-row main-actions">
+      <button class="btn primary lg" id="check-btn" type="button">Проверить на ИИ</button>
+      <button class="btn ghost" id="clear-btn" type="button">Очистить</button>
+    </div>
+  </section>
+
+  <!-- РЕЗУЛЬТАТЫ -->
+  <section id="results-section">
+    <div id="results"></div>
+
+    <div class="card" id="results-actions" hidden>
+      <h3>Экспорт результата</h3>
+      <div class="btn-row">
+        <button class="btn" id="dl-json" type="button">⬇ Скачать JSON для Claude</button>
+        <button class="btn" id="dl-md" type="button">⬇ Скачать отчёт (Markdown)</button>
+        <button class="btn" id="copy-prompt" type="button">📋 Промпт для Claude + текст</button>
+      </div>
+      <p class="muted">JSON содержит полный разбор, найденные штампы с заменами, рекомендации и исходный текст — загрузите его в Claude со словами «перепиши по этому отчёту», и он исправит текст по всем пунктам.</p>
+    </div>
+
+    <div class="card" id="humanize-card" hidden>
+      <h3>🪄 Очеловечить</h3>
+      <p class="muted">Автоматически убирает и заменяет найденные штампы (детерминированно, без нейросети — текст не отправляется никуда). Затем добейте вручную по чек-листу или через Claude.</p>
+      <div class="btn-row">
+        <button class="btn primary" id="hum-safe" type="button">Бережно (только явные штампы)</button>
+        <button class="btn" id="hum-aggr" type="button">Смело (все найденные)</button>
+      </div>
+      <div id="humanize-out"></div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="wrap foot">
+  <p><b>Дисклеймер.</b> Ни один детектор — ни этот, ни GigaCheck, ни GPTZero — не является доказательством авторства. Используйте отчёт как рабочий инструмент редактуры, а не как вердикт.</p>
+  <p class="muted">v1.0 · всё считается локально в браузере · план v2: нейро-очеловечивание, пакетная проверка URL, объединение с rutool (проверка требований о русском языке)</p>
+</footer>
+
+<script src="libs/jszip.min.js"></script>
+<script src="libs/pdf.min.js"></script>
+<script src="libs/pdf.worker.min.js"></script>
+<script src="js/kb.js"></script>
+<script src="js/detector.js"></script>
+<script src="js/humanize.js"></script>
+<script src="js/fileload.js"></script>
+<script src="js/report.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
