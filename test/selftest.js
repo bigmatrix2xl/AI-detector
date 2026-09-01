@@ -73,6 +73,17 @@ check('Число штампов после очеловечивания уме�
 check('Текст не сломан (длина в пределах разумного)', h.text.length > AI_TEXT.length * 0.7 && h.text.length <= AI_TEXT.length * 1.1);
 check('Нет следов поломанной пунктуации (", ," и т.п.)', !/,\s*,|\s[,.]|\.\./.test(h.text.replace(/\.\.\./g, '…')));
 
+// очеловечивание реального текста: штампы в косвенных падежах
+const INFLECTED = `Разработка сайта под ключ требует комплексного подхода к решению задач бизнеса. Использование инновационных решений и передовых технологий обеспечивает рост продаж. Индивидуальным подходом к каждому клиенту мы завоевали доверие партнёров, а интуитивно понятного интерфейса удалось добиться благодаря продуманной архитектуре. Конкурентным преимуществом компании является наличие собственного отдела разработки, что играет ключевую роль при выборе подрядчика.`;
+const rInf = det.analyze(INFLECTED, kb, { profile: 'balanced' });
+const hInf = hum.apply(INFLECTED, rInf, { mode: 'safe' });
+console.log('\nСловоформы (бережно): штампов ' + rInf.hits.length + ', правок: ' + hInf.changes.length);
+check('Штампы в косвенных падежах тоже правятся (>=4)', hInf.changes.length >= 4, hInf.changes.length);
+check('Существительное остаётся в своём падеже', /требует подхода к решению/.test(hInf.text), hInf.text.slice(0, 90));
+check('Глагольный штамп не заменён машинально',
+  /играет ключевую роль/.test(hInf.text) && hInf.skipped.some((s) => /играет/.test(s.phrase)));
+check('Заглавная буква восстановлена после снятия эпитета', /(^|\s)Подходом к каждому/.test(hInf.text));
+
 // английский
 const EN = `In today's fast-paced world, it is important to note that artificial intelligence plays a pivotal role in the ever-evolving landscape of business. Moreover, leveraging cutting-edge technologies can seamlessly unlock the potential of your organization. Furthermore, a comprehensive approach fosters robust growth. In conclusion, the world of digital transformation is a testament to innovation, and its importance cannot be overstated. Whether you are a beginner or an expert, this game-changer will elevate your strategy and take it to the next level. Additionally, harnessing synergy across teams underscores the crucial value of streamlined workflows.`;
 const rEN = det.analyze(EN, kb, { profile: 'balanced' });
