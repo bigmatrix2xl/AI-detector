@@ -29,21 +29,14 @@
       .replace(/&#(\d+);/g, function (_, d) { return String.fromCodePoint(parseInt(d, 10)); });
   }
 
-  /* ---------- DOCX ---------- */
+  /* ---------- DOCX ----------
+   * Разбор живёт в docx.js: там же строится карта смещений, по которой
+   * потом делается экспорт с пометками в исходный файл. Важно, чтобы текст
+   * для анализа и текст для разметки извлекались одним и тем же кодом.
+   */
   function parseDocx(buffer) {
-    if (typeof JSZip === 'undefined') return Promise.reject(new Error('Библиотека JSZip не загружена (libs/jszip.min.js)'));
-    return JSZip.loadAsync(buffer).then(function (zip) {
-      var doc = zip.file('word/document.xml');
-      if (!doc) throw new Error('Внутри DOCX не найден word/document.xml — файл повреждён?');
-      return doc.async('string');
-    }).then(function (xml) {
-      var text = xml
-        .replace(/<w:tab[^>]*\/>/g, '\t')
-        .replace(/<w:br[^>]*\/>/g, '\n')
-        .replace(/<\/w:p>/g, '\n')
-        .replace(/<[^>]+>/g, '');
-      return decodeXmlEntities(text).replace(/\n{3,}/g, '\n\n').trim();
-    });
+    if (typeof DocxExport === 'undefined') return Promise.reject(new Error('Модуль docx.js не загружен'));
+    return DocxExport.extract(buffer).then(function (res) { return res.text; });
   }
 
   /* ---------- ODT ---------- */
@@ -136,14 +129,28 @@
   function read(file) {
     var e = ext(file.name);
     var warnings = [];
+    var source = null;   // оригинал файла — чтобы вернуть его же с пометками
     var p;
-    if (e === 'docx') p = readAs(file, 'buffer').then(parseDocx);
+    if (e === 'docx') p = readAs(file, 'buffer').then(function (buf) {
+      return parseDocx(buf).then(function (text) {
+        source = { kind: 'docx', buffer: buf, text: text };
+        return text;
+      });
+    });
     else if (e === 'odt') p = readAs(file, 'buffer').then(parseOdt);
     else if (e === 'pdf') p = readAs(file, 'buffer').then(parsePdf).then(function (t) {
       if (t.length < 40) warnings.push('Из PDF извлечено очень мало текста — возможно, это скан без текстового слоя.');
       return t;
     });
-    else if (e === 'html' || e === 'htm') p = readAs(file, 'text').then(parseHtml);
+    else if (e === 'html' || e === 'htm') p = readAs(file, 'text').then(function (src) {
+      // из HTML оформление тоже сохраняем: заголовки, списки, жирный
+      var rich = typeof DocxExport !== 'undefined' ? DocxExport.richFromHtml(src) : null;
+      if (rich && rich.text.trim().length > 40) {
+        source = { kind: 'rich', rich: rich, text: rich.text };
+        return rich.text;
+      }
+      return parseHtml(src);
+    });
     else if (e === 'rtf') p = readAs(file, 'text').then(parseRtf);
     else if (e === 'csv' || e === 'tsv') p = readAs(file, 'text').then(parseCsv);
     else if (e === 'json') p = readAs(file, 'text').then(function (t) {
@@ -156,7 +163,7 @@
 
     return p.then(function (text) {
       if (!text || !text.trim()) throw new Error('В файле «' + file.name + '» не найдено текста');
-      return { text: text, name: file.name, kind: e || 'txt', warnings: warnings };
+      return { text: text, name: file.name, kind: e || 'txt', warnings: warnings, source: source };
     });
   }
 

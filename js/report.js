@@ -111,26 +111,76 @@
       '<div class="heat-strip">' + blocks + '</div><div class="heat-legend">' + legend + '</div></div>');
   }
 
-  /* ---------------- подсветка текста ---------------- */
-  function renderHighlighted(text, report) {
+  /* ---------------- находки в едином виде ----------------
+   * Один список пометок для всего: подсветки на экране и разметки в DOCX.
+   * kind: ai | starter | bur | human; tip — короткая подсказка (title),
+   * comment — развёрнутое пояснение для примечания в Word.
+   */
+  function replHint(h) {
+    if (!h.repl || !h.repl.length) return '';
+    if (h.repl[0] === '') return ' → лучше удалить';
+    return ' → ' + h.repl.filter(Boolean).join(' / ');
+  }
+
+  function buildMarks(report, opts) {
+    opts = opts || {};
     var marks = [];
+
     report.hits.forEach(function (h) {
-      marks.push({ start: h.start, end: h.end, cls: 'mk-ai', prio: 0, tip: (h.note || 'Штамп ИИ') + (h.repl && h.repl.length && h.repl[0] !== '' ? ' → ' + h.repl.filter(Boolean).join(' / ') : (h.repl && h.repl[0] === '' ? ' → лучше удалить' : '')) });
+      var fix = (!h.repl || !h.repl.length) ? 'Уберите оборот или скажите то же самое конкретнее.'
+        : h.repl[0] === '' ? 'Проще всего удалить: смысл не пострадает.'
+        : 'Замените на «' + h.repl.filter(Boolean).join('» / «') + '» — или уберите совсем.';
+      marks.push({
+        start: h.start, end: h.end, kind: 'ai', cls: 'mk-ai', prio: 0, text: h.match,
+        tip: (h.note || 'Штамп ИИ') + replHint(h),
+        comment: 'Штамп ИИ: «' + h.match + '».\n' + (h.note ? h.note + '\n' : '') +
+          'Что делать: ' + fix + ' Лучше всего — заменить конкретикой: цифрой, примером, деталью из практики.'
+      });
     });
     (report.starterHits || []).forEach(function (h) {
-      marks.push({ start: h.start, end: h.end, cls: 'mk-starter', prio: 1, tip: 'Шаблонное начало предложения — начните с сути: существительного, глагола, цифры или вопроса' });
+      marks.push({
+        start: h.start, end: h.end, kind: 'starter', cls: 'mk-starter', prio: 1, text: h.match,
+        tip: 'Шаблонное начало предложения — начните с сути: существительного, глагола, цифры или вопроса',
+        comment: 'Шаблонное начало предложения: «' + h.match + '».\n' +
+          'Так предложения начинает нейросеть, а живой автор — почти никогда.\n' +
+          'Что делать: начните сразу с сути — с существительного, глагола, цифры или вопроса.'
+      });
     });
     (report.burHits || []).forEach(function (h) {
-      marks.push({ start: h.start, end: h.end, cls: 'mk-bur', prio: 2, tip: h.note || 'Канцелярит — замените активным глаголом' });
+      marks.push({
+        start: h.start, end: h.end, kind: 'bur', cls: 'mk-bur', prio: 2, text: h.match,
+        tip: h.note || 'Канцелярит — замените активным глаголом',
+        comment: 'Канцелярит: «' + h.match + '».\n' +
+          'Что делать: замените активным глаголом — «доставляем» вместо «осуществляется доставка», ' +
+          '«отвечаем за» вместо «является ответственным за».'
+      });
     });
-    report.humanHits.forEach(function (h) {
-      marks.push({ start: h.start, end: h.end, cls: 'mk-human', prio: 3, tip: 'Живой человеческий маркер — сохраните при редактуре' });
-    });
+    if (opts.human !== false) {
+      report.humanHits.forEach(function (h) {
+        marks.push({
+          start: h.start, end: h.end, kind: 'human', cls: 'mk-human', prio: 3, text: h.match,
+          tip: 'Живой человеческий маркер — сохраните при редактуре',
+          comment: ''
+        });
+      });
+    }
+
     marks.sort(function (a, b) { return a.start - b.start || a.prio - b.prio; });
+    var out = [], pos = 0;
+    marks.forEach(function (m) {
+      if (m.start < pos) return;   // пересечения отбрасываем: приоритет у более важного типа
+      out.push(m);
+      pos = m.end;
+    });
+    return out;
+  }
+
+  /* ---------------- подсветка текста ---------------- */
+  function renderHighlighted(text, report) {
+    var marks = buildMarks(report, {});
     var counts = { 'mk-ai': 0, 'mk-starter': 0, 'mk-bur': 0, 'mk-human': 0 };
     var html = '', pos = 0;
     marks.forEach(function (m) {
-      if (m.start < pos) return;
       counts[m.cls]++;
       html += esc(text.slice(pos, m.start));
       html += '<mark class="' + m.cls + '" title="' + esc(m.tip) + '">' + esc(text.slice(m.start, m.end)) + '</mark>';
@@ -291,6 +341,7 @@
 
   root.Report = {
     render: render,
+    buildMarks: buildMarks,
     buildJson: buildJson,
     buildMarkdown: buildMarkdown,
     buildClaudePrompt: buildClaudePrompt,

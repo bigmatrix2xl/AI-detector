@@ -92,10 +92,18 @@
     <div class="card" id="results-actions" hidden>
       <h3>Экспорт результата</h3>
       <div class="btn-row">
+        <button class="btn primary" id="dl-docx" type="button">⬇ Скачать Word с пометками (.docx)</button>
         <button class="btn" id="dl-json" type="button">⬇ Скачать JSON для Claude</button>
         <button class="btn" id="dl-md" type="button">⬇ Скачать отчёт (Markdown)</button>
         <button class="btn" id="copy-prompt" type="button">📋 Промпт для Claude + текст</button>
       </div>
+      <p class="muted"><b>Word с пометками</b> — файл для копирайтера: тот же текст в том же оформлении (если загружали .docx — правится ваш же файл, со всеми стилями, таблицами и картинками), но проблемные места подсвечены, а на полях — примечания «что не так и как переписать». Сами мы ничего не исправляем: автор решает сам.</p>
+      <details class="docx-opts">
+        <summary>Что положить в файл Word</summary>
+        <label class="check-lab"><input type="checkbox" id="opt-comments" checked> Примечания на полях с объяснением каждой находки</label>
+        <label class="check-lab"><input type="checkbox" id="opt-human" checked> Подсвечивать зелёным живые места — их трогать не нужно</label>
+        <label class="check-lab"><input type="checkbox" id="opt-appendix" checked> Отчёт и список задач отдельной страницей в конце</label>
+      </details>
       <p class="muted">JSON содержит полный разбор, найденные штампы с заменами, рекомендации и исходный текст — загрузите его в Claude со словами «перепиши по этому отчёту», и он исправит текст по всем пунктам.</p>
     </div>
 
@@ -123,6 +131,7 @@
 <script src="js/kb.js"></script>
 <script src="js/detector.js"></script>
 <script src="js/humanize.js"></script>
+<script src="js/docx.js"></script>
 <script src="js/fileload.js"></script>
 <script src="js/report.js"></script>
 <script src="js/app.js"></script>

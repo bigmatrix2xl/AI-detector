@@ -292,6 +292,11 @@ mark.mk-human { background: var(--mark-human-bg); color: inherit; border-bottom:
   background: var(--page); color: var(--ink);
   border: 1px solid var(--grid); border-radius: 10px; padding: 12px; margin-bottom: 10px;
 }
+/* ---------- настройки экспорта в Word ---------- */
+.docx-opts { margin: 4px 0 10px; font-size: 14px; }
+.docx-opts > summary { cursor: pointer; font-weight: 600; }
+.docx-opts .check-lab { margin: 8px 0 0 2px; }
+
 .hum-details { margin: 10px 0; font-size: 14px; }
 .hum-details summary { cursor: pointer; font-weight: 600; }
 .hum-details s { color: var(--st-critical); }

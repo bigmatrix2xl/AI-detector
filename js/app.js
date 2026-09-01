@@ -6,7 +6,9 @@
   'use strict';
 
   var $ = function (sel) { return document.querySelector(sel); };
-  var state = { text: '', report: null, humanized: null, generatedAt: null };
+  // source — оригинал документа (буфер DOCX или разобранная структура),
+  // чтобы вернуть пользователю тот же файл в том же оформлении, но с пометками
+  var state = { text: '', report: null, humanized: null, generatedAt: null, source: null, fileName: '' };
 
   /* ---------------- настройки ---------------- */
 
@@ -52,8 +54,10 @@
 
   /* ---------------- ввод ---------------- */
 
-  function setText(text, sourceNote) {
+  function setText(text, sourceNote, source, fileName) {
     state.text = text;
+    state.source = source || null;
+    state.fileName = fileName || '';
     $('#input-text').value = text;
     updateCounter();
     if (sourceNote) note(sourceNote, 'ok');
@@ -85,7 +89,9 @@
     note('Читаю «' + file.name + '»…');
     FileLoader.read(file).then(function (res) {
       setText(res.text, 'Загружено из «' + res.name + '»: ' + res.text.length.toLocaleString('ru-RU') + ' символов' +
-        (res.warnings.length ? '. ' + res.warnings.join(' ') : ''));
+        (res.source && res.source.kind === 'docx' ? '. Оформление сохранено — сможете скачать этот же файл с пометками' : '') +
+        (res.warnings.length ? '. ' + res.warnings.join(' ') : ''),
+        res.source, res.name);
     }).catch(function (err) {
       note(err.message || 'Не удалось прочитать файл', 'err');
     });
@@ -161,7 +167,10 @@
   /* ---------------- экспорт ---------------- */
 
   function download(name, content, mime) {
-    var blob = new Blob([content], { type: (mime || 'application/octet-stream') + ';charset=utf-8' });
+    downloadBlob(name, new Blob([content], { type: (mime || 'application/octet-stream') + ';charset=utf-8' }));
+  }
+
+  function downloadBlob(name, blob) {
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = name;
@@ -172,6 +181,48 @@
 
   function stamp() {
     return (state.generatedAt || new Date().toISOString()).replace(/[:T]/g, '-').slice(0, 19);
+  }
+
+  /* ---------------- Word с пометками ---------------- */
+
+  function docxName() {
+    var base = (state.fileName || '').replace(/\.[a-z0-9]+$/i, '').trim();
+    if (!base) base = 'текст-' + stamp();
+    return base.slice(0, 80) + ' — правки.docx';
+  }
+
+  function runDocxExport(btn) {
+    if (!state.report) return;
+    if (typeof DocxExport === 'undefined' || typeof JSZip === 'undefined') {
+      note('Модуль экспорта в Word не загружен (js/docx.js, libs/jszip.min.js)', 'err');
+      return;
+    }
+    var old = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Собираю документ…';
+    DocxExport.build({
+      text: state.text,
+      report: state.report,
+      generatedAt: state.generatedAt,
+      source: state.source,
+      options: {
+        comments: $('#opt-comments').checked,
+        human: $('#opt-human').checked,
+        appendix: $('#opt-appendix').checked
+      }
+    }).then(function (res) {
+      downloadBlob(docxName(), res.blob);
+      var where = res.stats.mode === 'original'
+        ? 'Оформление исходного файла сохранено полностью'
+        : res.stats.mode === 'rebuilt'
+          ? 'Исходный DOCX разметить не удалось — документ собран заново'
+          : 'Документ собран из текста (заголовки, списки и жирный шрифт сохранены)';
+      note('Готово: ' + res.stats.marks + ' пометок, ' + res.stats.comments + ' комментариев. ' + where + '.', 'ok');
+    }).catch(function (err) {
+      note('Не удалось собрать .docx: ' + (err && err.message ? err.message : err), 'err');
+      if (window.console) console.error(err);
+    }).then(function () {
+      btn.disabled = false; btn.textContent = old;
+    });
   }
 
   function copyText(text, btn) {
@@ -191,6 +242,37 @@
 
   function escHtml(s) {
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* ---------------- вставка из Word с сохранением оформления ----------------
+   * Если текст копируют прямо из Word/Google Docs, в буфере лежит и HTML.
+   * Разбираем его в структуру (заголовки, списки, жирный) — тогда «Скачать
+   * Word с пометками» вернёт документ в том же виде. Любой сбой — молча
+   * отдаём вставку браузеру, как было раньше.
+   */
+  function tryRichPaste(e, cd) {
+    try {
+      var ta = $('#input-text');
+      if (e.target !== ta || typeof DocxExport === 'undefined') return;
+      var html = cd.getData('text/html');
+      if (!html || html.length < 60) return;
+      // структуру запоминаем только когда вставка заменяет весь текст целиком
+      var whole = !ta.value || (ta.selectionStart === 0 && ta.selectionEnd === ta.value.length);
+      if (!whole) return;
+      var rich = DocxExport.richFromHtml(html);
+      if (!rich || rich.text.trim().length < 40) return;
+      // если разбор HTML заметно разошёлся с обычным текстом из буфера —
+      // не рискуем содержимым и отдаём вставку браузеру
+      var plain = cd.getData('text/plain') || '';
+      if (plain) {
+        var a = rich.text.replace(/\s+/g, '').length, b = plain.replace(/\s+/g, '').length;
+        if (!b || a / b < 0.92 || a / b > 1.08) return;
+      }
+      e.preventDefault();
+      setText(rich.text, 'Вставлено с сохранением оформления: ' + rich.paragraphs.length +
+        ' абзацев. Их можно будет выгрузить обратно в Word с пометками.',
+        { kind: 'rich', rich: rich, text: rich.text }, '');
+    } catch (err) { /* не мешаем обычной вставке */ }
   }
 
   /* ---------------- примеры ---------------- */
@@ -213,7 +295,11 @@
       applyTheme(cur === 'auto' ? 'dark' : cur === 'dark' ? 'light' : 'auto');
     };
 
-    $('#input-text').addEventListener('input', updateCounter);
+    $('#input-text').addEventListener('input', function () {
+      // текст правили руками — оригинал документа больше ему не соответствует
+      if (state.source && state.source.text !== this.value) { state.source = null; state.fileName = ''; }
+      updateCounter();
+    });
     $('#check-btn').onclick = runCheck;
     $('#clear-btn').onclick = function () { setText(''); $('#results').innerHTML = ''; $('#results-actions').hidden = true; $('#humanize-card').hidden = true; };
     $('#sample-ai').onclick = function () { setText(SAMPLE_AI, 'Вставлен пример типичного ИИ-текста'); };
@@ -236,7 +322,7 @@
       var types = cd.types || [];
       var hasText = Array.prototype.indexOf.call(types, 'text/plain') !== -1 ||
                     Array.prototype.indexOf.call(types, 'text/html') !== -1;
-      if (hasText) return;
+      if (hasText) { tryRichPaste(e, cd); return; }
       if (cd.files && cd.files.length) {
         var f = cd.files[0];
         // Только реально поддерживаемые файлы; случайные картинки из буфера молча пропускаем
@@ -253,6 +339,7 @@
     $('#dl-md').onclick = function () {
       download('ai-report-' + stamp() + '.md', Report.buildMarkdown(state.text, state.report, state.generatedAt), 'text/markdown');
     };
+    $('#dl-docx').onclick = function () { runDocxExport(this); };
     $('#copy-prompt').onclick = function () {
       copyText(Report.buildClaudePrompt(state.report, true) + '\n\nТекст:\n' + state.text, this);
     };
