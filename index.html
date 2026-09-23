@@ -3,133 +3,164 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>AI Детектор — локальная проверка текста на ИИ</title>
-<meta name="description" content="Локальный детектор ИИ-текста: анализ штампов, ритма, канцелярита. Работает в браузере, без серверов и подписок.">
+<title>ИИ Детектор Пылова — проверка текста на ИИ</title>
+<meta name="description" content="Локальный детектор ИИ-текста: штампы, ритм, канцелярит, смысловые повторы. Работает в браузере, текст никуда не уходит.">
 <link rel="stylesheet" href="styles.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕵️</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%23111113'/><text x='32' y='42' text-anchor='middle' font-family='system-ui,sans-serif' font-size='26' font-weight='700' fill='white'>AI</text></svg>">
 </head>
 <body>
 
-<header class="topbar">
-  <div class="wrap topbar-in">
-    <div class="brand">
-      <span class="brand-mark">🕵️</span>
-      <div>
-        <h1>AI Детектор</h1>
-        <p>Локальная проверка текста на ИИ-следы · работает офлайн, данные не покидают компьютер</p>
-      </div>
+<header class="topbar wrap">
+  <div class="brand">
+    <span class="brand-mark">AI</span>
+    <div>
+      <div class="brand-name">ИИ Детектор Пылова <span class="brand-ver" id="brand-ver"></span></div>
+      <div class="brand-sub">Работает в браузере · текст никуда не уходит</div>
     </div>
-    <button id="theme-btn" class="btn ghost" type="button">◐ Авто</button>
+  </div>
+  <div class="top-actions">
+    <button id="theme-btn" class="pill ghost" type="button">Тема: авто</button>
+    <button id="about-btn" class="icon-btn" type="button" aria-label="О детекторе и версии" title="О детекторе">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
   </div>
 </header>
+
+<dialog id="about" class="about">
+  <div class="about-head">
+    <div>
+      <div class="eyebrow">О детекторе</div>
+      <h2 id="about-title"></h2>
+      <p class="muted" id="about-date"></p>
+    </div>
+    <button class="icon-btn" type="button" id="about-close" aria-label="Закрыть">✕</button>
+  </div>
+  <p>Проверяет текст на признаки нейросети прямо в браузере: текст никуда не отправляется, лимитов нет. Одинаковый текст всегда получает одинаковый балл.</p>
+  <div class="eyebrow">Что нового</div>
+  <div id="about-changes"></div>
+</dialog>
 
 <main class="wrap">
 
   <!-- ВВОД -->
-  <section class="card" id="input-section">
-    <div class="card-head">
-      <h2>Текст для проверки</h2>
-      <div class="btn-row">
-        <button class="btn ghost sm" id="sample-ai" type="button">Пример: ИИ-текст</button>
-        <button class="btn ghost sm" id="sample-human" type="button">Пример: живой текст</button>
-      </div>
-    </div>
-
-    <div id="drop-zone" class="drop-zone">
-      <textarea id="input-text" placeholder="Вставьте текст любого объёма — статью, лендинг, карточку товара…&#10;&#10;Или перетащите сюда файл: DOCX, PDF, ODT, TXT, MD, HTML, RTF, CSV." spellcheck="false"></textarea>
-      <div class="input-foot">
-        <span id="counter" class="muted">0 симв. · 0 слов</span>
-        <label class="btn ghost sm file-btn">📎 Прикрепить файл
-          <input type="file" id="file-input" accept=".docx,.pdf,.odt,.txt,.md,.markdown,.html,.htm,.rtf,.csv,.tsv,.json" hidden>
-        </label>
-      </div>
-    </div>
-
-    <p id="note" class="note" hidden></p>
-
-    <!-- НАСТРОЙКИ -->
-    <details class="settings">
-      <summary>⚙️ Настройки анализа</summary>
-      <div class="settings-grid">
-        <fieldset>
-          <legend>Профиль чувствительности</legend>
-          <label><input type="radio" name="profile" value="strict"> <b>Строгий</b> — ловит всё подозрительное; как самые придирчивые детекторы. Для важных публикаций.</label>
-          <label><input type="radio" name="profile" value="balanced" checked> <b>Сбалансированный</b> — рекомендуемый режим.</label>
-          <label><input type="radio" name="profile" value="soft"> <b>Мягкий</b> — только явные признаки; меньше ложных срабатываний на сухих экспертных текстах.</label>
-        </fieldset>
-        <div class="settings-col">
-          <label class="row-lab">Язык текста
-            <select id="set-lang">
-              <option value="auto" selected>Автоопределение</option>
-              <option value="ru">Русский</option>
-              <option value="en">Английский</option>
-            </select>
-          </label>
-          <label class="row-lab">Размер сегмента, симв.
-            <input type="number" id="set-seg" min="400" max="4000" step="100" value="900">
-          </label>
-          <label class="check-lab"><input type="checkbox" id="set-md"> Списки и заголовки задуманы автором (Markdown) — не считать структуру ИИ-признаком</label>
-          <label class="row-lab">Фразы-исключения (не считать штампами), через запятую или с новой строки
-            <textarea id="set-wl" rows="2" placeholder="например: комплексный подход"></textarea>
-          </label>
+  <section class="input-grid" id="input-section">
+    <div class="panel input-panel">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Шаг 1</div>
+          <h2>Текст для проверки</h2>
+        </div>
+        <div class="btn-row">
+          <button class="pill ghost sm" id="sample-ai" type="button">Пример ИИ</button>
+          <button class="pill ghost sm" id="sample-human" type="button">Пример человека</button>
         </div>
       </div>
-      <div class="info-box">
-        <b>Почему у разных детекторов разные результаты?</b> Все детекторы — вероятностные: GigaCheck смотрит одни признаки, ZeroGPT — другие, поэтому один текст получает разные вердикты. Этот инструмент детерминированный: одинаковый текст с одинаковыми настройками всегда даёт один и тот же результат. «Плавающие» оценки у внешних сервисов имитируются профилем чувствительности: проверьте текст в «Строгом» — если и он говорит «человек», текст с большим запасом пройдёт большинство детекторов.
-      </div>
-    </details>
 
-    <div class="btn-row main-actions">
-      <button class="btn primary lg" id="check-btn" type="button">Проверить на ИИ</button>
-      <button class="btn ghost" id="clear-btn" type="button">Очистить</button>
+      <div id="drop-zone" class="drop-zone">
+        <textarea id="input-text" placeholder="Вставьте текст любого объёма — статью, кейс, карточку товара.&#10;&#10;Или перетащите сюда файл: DOCX, PDF, ODT, TXT, MD, HTML, RTF. Несколько файлов сразу — пакетная проверка со сводной таблицей." spellcheck="false"></textarea>
+      </div>
+      <div class="input-foot">
+        <span id="counter" class="muted">0 симв. · 0 слов</span>
+        <label class="pill ghost sm file-btn">Прикрепить файлы
+          <input type="file" id="file-input" multiple accept=".docx,.pdf,.odt,.txt,.md,.markdown,.html,.htm,.rtf,.csv,.tsv,.json" hidden>
+        </label>
+      </div>
+      <p id="note" class="note" hidden></p>
     </div>
+
+    <aside class="panel settings-panel">
+      <div class="eyebrow">Шаг 2</div>
+      <h2>Настройки</h2>
+
+      <div class="field">
+        <div class="field-label">Строгость</div>
+        <div class="seg-ctl" role="radiogroup" aria-label="Строгость проверки">
+          <label><input type="radio" name="profile" value="strict" checked><span>Строго</span></label>
+          <label><input type="radio" name="profile" value="balanced"><span>Обычно</span></label>
+          <label><input type="radio" name="profile" value="soft"><span>Мягко</span></label>
+        </div>
+        <p class="field-hint" id="profile-hint"></p>
+      </div>
+
+      <label class="check-lab"><input type="checkbox" id="set-md"> <span>В тексте по делу нужны списки и подзаголовки (инструкция, характеристики, прайс) — не штрафовать за них</span></label>
+
+      <details class="more">
+        <summary>Ещё настройки</summary>
+        <label class="field-label" for="set-wl">Фразы-исключения — не считать штампами</label>
+        <textarea id="set-wl" rows="2" placeholder="например: комплексный подход"></textarea>
+        <label class="field-label" for="set-lang">Язык текста</label>
+        <select id="set-lang">
+          <option value="auto" selected>Определять сам</option>
+          <option value="ru">Русский</option>
+          <option value="en">Английский</option>
+        </select>
+        <label class="field-label" for="set-seg">Размер сегмента, символов</label>
+        <input type="number" id="set-seg" min="400" max="4000" step="100" value="900">
+        <p class="field-hint">900 — примерно абзац-два, так режет GigaCheck. Менять незачем.</p>
+      </details>
+
+      <div class="actions">
+        <button class="pill primary lg" id="check-btn" type="button">Проверить</button>
+        <button class="pill ghost" id="clear-btn" type="button">Очистить</button>
+      </div>
+    </aside>
   </section>
 
   <!-- РЕЗУЛЬТАТЫ -->
   <section id="results-section">
     <div id="results"></div>
 
-    <div class="card" id="results-actions" hidden>
-      <h3>Экспорт результата</h3>
-      <div class="btn-row">
-        <button class="btn primary" id="dl-docx" type="button">⬇ Скачать Word с пометками (.docx)</button>
-        <button class="btn" id="dl-json" type="button">⬇ Скачать JSON для Claude</button>
-        <button class="btn" id="dl-md" type="button">⬇ Скачать отчёт (Markdown)</button>
-        <button class="btn" id="copy-prompt" type="button">📋 Промпт для Claude + текст</button>
+    <div class="panel export-panel" id="results-actions" hidden>
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">Готово</div>
+          <h2>Экспорт</h2>
+        </div>
       </div>
-      <p class="muted"><b>Word с пометками</b> — файл для копирайтера: тот же текст в том же оформлении (если загружали .docx — правится ваш же файл, со всеми стилями, таблицами и картинками), но проблемные места подсвечены, а на полях — примечания «что не так и как переписать». Сами мы ничего не исправляем: автор решает сам.</p>
-      <details class="docx-opts">
-        <summary>Что положить в файл Word</summary>
-        <label class="check-lab"><input type="checkbox" id="opt-comments" checked> Примечания на полях с объяснением каждой находки</label>
-        <label class="check-lab"><input type="checkbox" id="opt-human" checked> Подсвечивать зелёным живые места — их трогать не нужно</label>
-        <label class="check-lab"><input type="checkbox" id="opt-appendix" checked> Отчёт и список задач отдельной страницей в конце</label>
+      <div class="export-grid">
+        <button class="export-tile primary" id="dl-docx" type="button"><b>Word с пометками</b><span>Для копирайтера: тот же документ, проблемные места подсвечены, на полях — что и как исправить.</span></button>
+        <button class="export-tile primary" id="dl-json" type="button"><b>JSON для Claude или ChatGPT</b><span>Загрузите его в чат и напишите «перепиши по отчёту». Внутри текст, задание и список предложений с причинами.</span></button>
+        <button class="export-tile" id="dl-client" type="button"><b>Отчёт для заказчика</b><span>Одна страница: балл, решение и текст с подсветкой. Открывается в любом браузере.</span></button>
+      </div>
+      <details class="more docx-opts">
+        <summary>Другие форматы</summary>
+        <div class="btn-row">
+          <button class="pill ghost sm" id="copy-prompt" type="button">Скопировать задание с текстом</button>
+          <button class="pill ghost sm" id="dl-md" type="button">Отчёт в Markdown</button>
+        </div>
+        <p class="field-hint">«Скопировать задание» — то же, что файл для нейросети, но в буфер обмена: удобно, если чат не принимает файлы.</p>
       </details>
-      <p class="muted">JSON содержит полный разбор, найденные штампы с заменами, рекомендации и исходный текст — загрузите его в Claude со словами «перепиши по этому отчёту», и он исправит текст по всем пунктам.</p>
+      <details class="more docx-opts">
+        <summary>Что положить в файл Word</summary>
+        <label class="check-lab"><input type="checkbox" id="opt-comments" checked> <span>Примечания на полях с объяснением каждой находки</span></label>
+        <label class="check-lab"><input type="checkbox" id="opt-sent" checked> <span>Подсвечивать предложения, которые выглядят машинными</span></label>
+        <label class="check-lab"><input type="checkbox" id="opt-human" checked> <span>Подсвечивать живые места — их трогать не нужно</span></label>
+        <label class="check-lab"><input type="checkbox" id="opt-appendix" checked> <span>Отчёт и список задач отдельной страницей в конце</span></label>
+      </details>
     </div>
 
-    <div class="card" id="humanize-card" hidden>
-      <h3>🪄 Очеловечить</h3>
-      <p class="muted">Автоматически убирает и заменяет найденные штампы (детерминированно, без нейросети — текст не отправляется никуда): снимает пустые эпитеты в любой словоформе («комплексного подхода» → «подхода»), выбрасывает вводные и связки. Всё, где нужно перестроить фразу, уходит в чек-лист — это добивается вручную или через Claude.</p>
-      <div class="btn-row">
-        <button class="btn primary" id="hum-safe" type="button">Бережно (только явные штампы)</button>
-        <button class="btn" id="hum-aggr" type="button">Смело (все найденные)</button>
-      </div>
-      <div id="humanize-out"></div>
-    </div>
+    <!-- Очеловечивание словарными заменами спрятано: без нейросети оно почти
+         ничего не даёт. Вернётся, когда появится переписывание моделью. -->
+    <div id="humanize-card" hidden><div id="humanize-out"></div></div>
   </section>
 
 </main>
 
 <footer class="wrap foot">
-  <p><b>Дисклеймер.</b> Ни один детектор — ни этот, ни GigaCheck, ни GPTZero — не является доказательством авторства. Используйте отчёт как рабочий инструмент редактуры, а не как вердикт.</p>
-  <p class="muted">v1.0 · всё считается локально в браузере · план v2: нейро-очеловечивание, пакетная проверка URL, объединение с rutool (проверка требований о русском языке)</p>
+  <p>Ни один детектор — ни этот, ни GigaCheck, ни GPTZero — не доказывает авторство. Это инструмент редактуры, а не вердикт.</p>
 </footer>
 
 <script src="libs/jszip.min.js"></script>
 <script src="libs/pdf.min.js"></script>
 <script src="libs/pdf.worker.min.js"></script>
+<script src="js/version.js"></script>
 <script src="js/kb.js"></script>
+<script src="js/wordpiece.js"></script>
+<script src="js/bert.js"></script>
+<script src="js/semantic.js"></script>
+<script src="js/sentences.js"></script>
 <script src="js/detector.js"></script>
+<script src="js/seo.js"></script>
 <script src="js/humanize.js"></script>
 <script src="js/docx.js"></script>
 <script src="js/fileload.js"></script>

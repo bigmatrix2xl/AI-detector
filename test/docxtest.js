@@ -12,8 +12,9 @@ const path = require('path');
 const JSZip = require(path.join(__dirname, '..', 'libs', 'jszip.min.js'));
 global.JSZip = JSZip;
 
-require(path.join(__dirname, '..', 'js', 'kb.js'));
-require(path.join(__dirname, '..', 'js', 'detector.js'));
+const AIDetectorKB = require(path.join(__dirname, '..', 'js', 'kb.js'));
+require(path.join(__dirname, '..', 'js', 'sentences.js'));
+const AIDetector = require(path.join(__dirname, '..', 'js', 'detector.js'));
 require(path.join(__dirname, '..', 'js', 'report.js'));
 require(path.join(__dirname, '..', 'js', 'docx.js'));
 
@@ -56,7 +57,7 @@ function unesc(s) {
 // тексты всех прогонов с подсветкой, в порядке документа
 function highlightedRuns(xml) {
   const out = [];
-  const re = /<w:r><w:rPr>(?:(?!<\/w:rPr>).)*<w:highlight w:val="([a-z]+)"\/>(?:(?!<\/w:rPr>).)*<\/w:rPr><w:t[^>]*>((?:(?!<\/w:t>)[\s\S])*)<\/w:t><\/w:r>/g;
+  const re = /<w:r><w:rPr>(?:(?!<\/w:rPr>).)*<w:highlight w:val="([a-zA-Z]+)"\/>(?:(?!<\/w:rPr>).)*<\/w:rPr><w:t[^>]*>((?:(?!<\/w:t>)[\s\S])*)<\/w:t><\/w:r>/g;
   let m;
   while ((m = re.exec(xml)) !== null) out.push({ color: m[1], text: unesc(m[2]) });
   return out;
@@ -91,7 +92,10 @@ async function main() {
 
   /* ---------- A. сборка с нуля ---------- */
   console.log('\nA. DOCX собирается с нуля (исходного файла не было)');
-  const genRes = await DocxExport.build({ text: TEXT, report: report, source: null, generatedAt: new Date().toISOString() });
+  // здесь проверяем инвариант словесных пометок — предложения выключаем,
+  // их отдельно проверяет раздел F
+  const genRes = await DocxExport.build({ text: TEXT, report: report, source: null,
+    options: { sentences: false }, generatedAt: new Date().toISOString() });
   const gen = await zipOf(genRes.blob);
   check('режим = generated', genRes.stats.mode === 'generated', 'режим: ' + genRes.stats.mode);
 
@@ -219,6 +223,64 @@ async function main() {
   check('заголовок и список распознаны',
     richH.paragraphs[1].kind === 'h2' && richH.paragraphs[2].kind === 'li',
     richH.paragraphs.map((p) => p.kind).join(','));
+
+  /* ---------- F. подсветка предложений ---------- */
+  console.log('\nF. Подсветка предложений в Word (серым, поверх — пометки на словах)');
+  const marksS = Report.buildMarks(report, { sentences: true });
+  check('предложения добавили пометок', marksS.length > marks.length,
+    marksS.length + ' против ' + marks.length + ' без предложений');
+  check('пометки по-прежнему не пересекаются и отсортированы',
+    marksS.every((m, i) => i === 0 || m.start >= marksS[i - 1].end));
+  check('пометки на предложениях не накрывают пометки на словах',
+    marksS.filter((m) => m.kind === 'sent')
+      .every((sm) => marksS.filter((w) => w.kind !== 'sent')
+        .every((w) => sm.end <= w.start || sm.start >= w.end)));
+  check('у предложения ровно одно примечание на все его куски',
+    marksS.filter((m) => m.kind === 'sent' && m.comment).length <=
+    marksS.filter((m) => m.kind === 'sent').length);
+
+  const sentRes = await DocxExport.build({
+    text: TEXT, report: report, source: null,
+    options: { comments: true, human: true, appendix: true, sentences: true },
+    generatedAt: new Date().toISOString()
+  });
+  const sentZip = await zipOf(sentRes.blob);
+  const sentDoc = await readFile(sentZip.zip, 'word/document.xml');
+  check('document.xml — корректный XML', !xmlWellFormed(sentDoc), xmlWellFormed(sentDoc));
+  const greyAll = highlightedRuns(sentDoc).filter((h) => h.color === 'lightGray');
+  // из легенды в шапке идёт один серый образец — он не из текста
+  const grey = greyAll.filter((h) => h.text.trim() !== 'предложение целиком');
+  check('серая заливка предложений появилась', grey.length > 0, grey.length + ' фрагментов');
+  check('серые фрагменты — настоящий текст документа',
+    grey.every((h) => TEXT.indexOf(h.text) !== -1),
+    (grey.find((h) => TEXT.indexOf(h.text) === -1) || {}).text);
+  check('в легенде есть образец серой подсветки', greyAll.length > grey.length);
+
+  /* ---------- G. смысловые повторы доезжают до Word ---------- */
+  console.log('\nG. Смысловые повторы в примечаниях Word');
+  const repReport = AIDetector.analyze(TEXT, AIDetectorKB, { profile: 'balanced' });
+  const s1 = AIDetector.splitSentences(TEXT)[0];
+  const s2 = AIDetector.splitSentences(TEXT)[3];
+  // подставляем пару вручную: сама модель в этом тесте не нужна
+  repReport.repeats = [{ score: 0.87, level: 'strong',
+    a: { start: s1.start, end: s1.end, text: s1.text },
+    b: { start: s2.start, end: s2.end, text: s2.text } }];
+  const repMarks = Report.buildMarks(repReport, { sentences: true });
+  const repComments = repMarks.filter((m) => m.comment && m.comment.indexOf('Смысловой повтор') !== -1);
+  check('повтор попал в примечания', repComments.length >= 1, repComments.length);
+  check('в примечании есть парное предложение',
+    repComments.some((m) => m.comment.indexOf(s2.text.slice(0, 25)) !== -1 ||
+                            m.comment.indexOf(s1.text.slice(0, 25)) !== -1));
+  check('пометки по-прежнему не пересекаются',
+    repMarks.every((m, i) => i === 0 || m.start >= repMarks[i - 1].end));
+
+  const repRes = await DocxExport.build({
+    text: TEXT, report: repReport, source: null,
+    options: { comments: true, human: true, appendix: true, sentences: true },
+    generatedAt: new Date().toISOString()
+  });
+  const repDoc = await readFile((await zipOf(repRes.blob)).zip, 'word/document.xml');
+  check('document.xml — корректный XML', !xmlWellFormed(repDoc), xmlWellFormed(repDoc));
 
   console.log(failed ? '\n' + failed + ' проверок провалено' : '\nВсе проверки пройдены');
   process.exit(failed ? 1 : 0);

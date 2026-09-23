@@ -12,7 +12,7 @@
 
   /* ---------------- настройки ---------------- */
 
-  var DEFAULTS = { profile: 'balanced', lang: 'auto', segmentSize: 900, markdownAware: false, whitelist: '' };
+  var DEFAULTS = { profile: 'strict', lang: 'auto', segmentSize: 900, markdownAware: false, semantic: true, whitelist: '', threshold: 25 };
 
   function loadSettings() {
     try {
@@ -25,11 +25,13 @@
   }
   function readSettingsFromUi() {
     var s = {
-      profile: (document.querySelector('input[name="profile"]:checked') || {}).value || 'balanced',
+      profile: (document.querySelector('input[name="profile"]:checked') || {}).value || 'strict',
       lang: $('#set-lang').value,
       segmentSize: parseInt($('#set-seg').value, 10) || 900,
       markdownAware: $('#set-md').checked,
-      whitelist: $('#set-wl').value
+      semantic: true,   // смысловые повторы — часть проверки, без выключателя
+      whitelist: $('#set-wl').value,
+      threshold: THRESHOLD
     };
     saveSettings(s);
     return s;
@@ -41,6 +43,26 @@
     $('#set-seg').value = s.segmentSize;
     $('#set-md').checked = !!s.markdownAware;
     $('#set-wl').value = s.whitelist || '';
+    profileHint();
+  }
+
+  /* Порог приёмки один — 25. Строгость двигает не его, а сам балл: строгий
+     профиль умножает балл ИИ на 1.14 и прибавляет 3, мягкий — на 0.87 и
+     вычитает 3. Поэтому отдельное поле порога не нужно: это та же ручка. */
+  var THRESHOLD = 25;
+  var PROFILE_HINT = {
+    strict: 'Балл завышается, как у самых придирчивых детекторов. «Можно сдавать» — при 25 и ниже. Прошёл здесь — пройдёт и остальные.',
+    balanced: 'Средняя строгость: тот же текст получит на 4–10 баллов меньше, чем в «Строго». «Можно сдавать» — при 25 и ниже.',
+    soft: 'Для сухих технических текстов: балл занижается. «Можно сдавать» — при 25 и ниже.'
+  };
+  function profileHint() {
+    var r = document.querySelector('input[name="profile"]:checked');
+    $('#profile-hint').textContent = PROFILE_HINT[r ? r.value : 'strict'];
+  }
+
+  // параметры отрисовки отчёта: порог приёмки и снимок прошлой проверки
+  function renderOpts() {
+    return { threshold: readSettingsFromUi().threshold, prev: state.prev };
   }
 
   /* ---------------- тема ---------------- */
@@ -49,7 +71,7 @@
     if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', mode);
     try { localStorage.setItem('aidet_theme', mode); } catch (e) {}
-    $('#theme-btn').textContent = mode === 'auto' ? '◐ Авто' : mode === 'dark' ? '● Тёмная' : '○ Светлая';
+    $('#theme-btn').textContent = 'Тема: ' + (mode === 'auto' ? 'авто' : mode === 'dark' ? 'тёмная' : 'светлая');
   }
 
   /* ---------------- ввод ---------------- */
@@ -58,6 +80,7 @@
     state.text = text;
     state.source = source || null;
     state.fileName = fileName || '';
+    if (sourceNote) state.prev = null;   // новый документ или пример — сравнивать не с чем
     $('#input-text').value = text;
     updateCounter();
     if (sourceNote) note(sourceNote, 'ok');
@@ -85,6 +108,7 @@
 
   function handleFiles(files) {
     if (!files || !files.length) return;
+    if (files.length > 1) { runBatch(Array.prototype.slice.call(files)); return; }
     var file = files[0];
     note('Читаю «' + file.name + '»…');
     FileLoader.read(file).then(function (res) {
@@ -97,6 +121,147 @@
     });
   }
 
+  /* ---------------- пакетная проверка ----------------
+   * Несколько файлов — сводная таблица: балл, шкала словами, решение по
+   * порогу приёмки. Смысловые повторы здесь не считаются, чтобы таблица
+   * собиралась быстро; полный разбор — щелчком по строке.
+   */
+  var batch = [];
+
+  function runBatch(files) {
+    semRun++;
+    state.report = null;
+    $('#results-actions').hidden = true;
+    var s = readSettingsFromUi();
+    var whitelist = s.whitelist.split(/[\n,;]+/).map(function (x) { return x.trim().toLowerCase(); }).filter(Boolean);
+    batch = [];
+    $('#results').innerHTML = '<div class="panel batch"><p class="sem-run">Читаю файлы: 0 из ' + files.length + '</p></div>';
+    $('#results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    var i = 0;
+    (function next() {
+      if (i >= files.length) { renderBatch(s.threshold); return; }
+      var f = files[i++];
+      var st = $('#results .sem-run');
+      if (st) st.textContent = 'Проверяю «' + f.name + '»: ' + i + ' из ' + files.length;
+      FileLoader.read(f).then(function (res) {
+        var rep = AIDetector.analyze(res.text, AIDetectorKB, {
+          profile: s.profile, lang: s.lang, segmentSize: s.segmentSize, markdownAware: s.markdownAware, whitelist: whitelist
+        });
+        batch.push({ name: f.name, text: res.text, source: res.source, report: rep });
+      }).catch(function (err) {
+        batch.push({ name: f.name, error: err && err.message ? err.message : 'не удалось прочитать' });
+      }).then(function () { setTimeout(next, 0); });
+    })();
+  }
+
+  function renderBatch(threshold) {
+    var rows = batch.map(function (b, idx) {
+      if (b.error) return '<tr><td class="b-name">' + escHtml(b.name) + '</td><td colspan="7" class="muted">' + escHtml(b.error) + '</td></tr>';
+      var r = b.report, acc = Report.acceptance(r, threshold), si = Report.scaleIndex(r.overall.aiScore);
+      var flagged = r.heat.filter(function (h) { return h.level === 'AI' || h.level === 'LIKELY_AI'; }).length;
+      var aiSeg = (r.distribution.AI || 0) + (r.distribution.LIKELY_AI || 0);
+      return '<tr data-open="' + idx + '" tabindex="0">' +
+        '<td class="b-name">' + escHtml(b.name) + '</td>' +
+        '<td class="num">' + r.meta.words.toLocaleString('ru-RU') + '</td>' +
+        '<td class="num"><b>' + r.overall.aiScore + '</b></td>' +
+        '<td><span class="lvl-dot lvl-' + si + '"></span>' + Report.SCALE[si].word + '</td>' +
+        '<td><span class="tag ' + (acc.ok ? 'ok' : 'no') + '">' + (acc.ok ? 'Можно сдавать' : 'На доработку') + '</span></td>' +
+        '<td class="num">' + flagged + '</td>' +
+        '<td class="num">' + r.hits.length + '</td>' +
+        '<td class="num">' + aiSeg + '</td></tr>';
+    }).join('');
+    var okN = batch.filter(function (b) { return !b.error && Report.acceptance(b.report, threshold).ok; }).length;
+    $('#results').innerHTML = '<div class="panel batch">' +
+      '<div class="panel-head"><div><div class="eyebrow">Пакетная проверка · порог ' + threshold + '</div>' +
+      '<h2>' + batch.length + ' ' + (batch.length < 5 ? 'файла' : 'файлов') + ' · можно сдавать ' + okN + '</h2></div>' +
+      '<button class="pill ghost sm" id="batch-csv" type="button">Скачать таблицу (CSV)</button></div>' +
+      '<div class="table-wrap"><table class="btable"><thead><tr><th>Файл</th><th class="num">Слов</th><th class="num">Балл</th>' +
+      '<th>Оценка</th><th>Решение</th><th class="num">К правке</th><th class="num">Штампы</th><th class="num">ИИ-сегм.</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody></table></div>' +
+      '<p class="muted">Щелчок по строке — полный разбор файла с подсветкой и смысловыми повторами.</p></div>';
+    var open = function (tr) {
+      var b = batch[+tr.getAttribute('data-open')];
+      state.prev = null;
+      setText(b.text, 'Открыт «' + b.name + '» из пакетной проверки', b.source, b.name);
+      runCheck();
+    };
+    Array.prototype.forEach.call(document.querySelectorAll('.btable tr[data-open]'), function (tr) {
+      tr.onclick = function () { open(tr); };
+      tr.onkeydown = function (e) { if (e.key === 'Enter') open(tr); };
+    });
+    $('#batch-csv').onclick = function () {
+      var head = 'Файл;Слов;Балл;Оценка;Решение;К правке;Штампы;ИИ-сегментов';
+      var lines = batch.filter(function (b) { return !b.error; }).map(function (b) {
+        var r = b.report, acc = Report.acceptance(r, threshold);
+        return ['"' + b.name.replace(/"/g, '""') + '"', r.meta.words, r.overall.aiScore, Report.SCALE[Report.scaleIndex(r.overall.aiScore)].word,
+          acc.ok ? 'Можно сдавать' : 'На доработку',
+          r.heat.filter(function (h) { return h.level === 'AI' || h.level === 'LIKELY_AI'; }).length,
+          r.hits.length, (r.distribution.AI || 0) + (r.distribution.LIKELY_AI || 0)].join(';');
+      });
+      // BOM — чтобы Excel открыл кириллицу без плясок с кодировкой
+      download('пакетная-проверка-' + stamp() + '.csv', '\ufeff' + [head].concat(lines).join('\n'), 'text/csv');
+    };
+  }
+
+  /* ---------------- смысловые повторы ----------------
+   * Отдельной кнопки нет: повторы — часть проверки. Считаются сразу после
+   * основного разбора и попадают в сам отчёт: в подсветку текста, в раздел
+   * «Смысловые повторы» и во все выгрузки. Модель (15 МБ) грузится один раз,
+   * дальше она в памяти и в кеше браузера.
+   */
+  var semRun = 0;
+
+  function rerender() {
+    // отчёт пересобирается целиком — держим место, на котором стоял читатель
+    var y = window.pageYOffset;
+    Report.render($('#results'), state.text, state.report, renderOpts());
+    window.scrollTo(0, y);
+    var retry = $('#sem-retry');
+    if (retry) retry.onclick = function () { runSemantic(); };
+  }
+
+  function runSemantic() {
+    if (!state.report) return;
+    var token = ++semRun;
+    if (typeof Semantic === 'undefined') {
+      state.report.semantic = { state: 'off', why: 'модуль js/semantic.js не загружен' };
+      rerender();
+      return;
+    }
+    if (!readSettingsFromUi().semantic) {
+      state.report.semantic = { state: 'off' };
+      state.report.repeats = [];
+      rerender();
+      return;
+    }
+    state.report.semantic = {
+      state: 'run',
+      msg: Semantic.isReady() ? 'Считаю…' : 'Загружаю модель, около 15 МБ. Это один раз — дальше она в кеше браузера.'
+    };
+    rerender();
+
+    var t0 = Date.now();
+    var sents = AIDetector.splitSentences(state.text);
+    Semantic.findRepeats(sents, {}, function (msg) {
+      if (token === semRun) Report.setSemanticStatus(msg);
+    }).then(function (pairs) {
+      if (token !== semRun) return;
+      state.report.repeats = pairs;
+      state.report.semantic = {
+        state: 'done',
+        secs: ((Date.now() - t0) / 1000).toFixed(1),
+        backend: Semantic.backend()
+      };
+      rerender();
+    }).catch(function (e) {
+      if (token !== semRun) return;
+      state.report.repeats = [];
+      state.report.semantic = { state: 'error', msg: e && e.message ? e.message : String(e) };
+      rerender();
+      if (window.console) console.error(e);
+    });
+  }
+
   /* ---------------- анализ ---------------- */
 
   function runCheck() {
@@ -104,11 +269,13 @@
     if (!text.trim()) { note('Вставьте текст или прикрепите файл', 'err'); return; }
     if (text.trim().length < 120) { note('Текст слишком короткий: нужно хотя бы пара абзацев (150+ слов)', 'err'); return; }
     var btn = $('#check-btn');
-    btn.disabled = true; btn.textContent = 'Анализирую…';
+    btn.disabled = true; btn.textContent = 'Проверяю…';
     setTimeout(function () {
       try {
         var s = readSettingsFromUi();
         var whitelist = s.whitelist.split(/[\n,;]+/).map(function (x) { return x.trim().toLowerCase(); }).filter(Boolean);
+        // снимок прошлой проверки — для блока «Сравнение»
+        if (state.report && state.text && state.text !== text) state.prev = Report.snapshot(state.text, state.report);
         state.text = text;
         state.generatedAt = new Date().toISOString();
         state.report = AIDetector.analyze(text, AIDetectorKB, {
@@ -116,16 +283,20 @@
           markdownAware: s.markdownAware, whitelist: whitelist
         });
         state.humanized = null;
-        Report.render($('#results'), text, state.report);
+        state.report.repeats = [];
+        // сразу показываем, что повторы считаются, — иначе в отчёте на секунду
+        // мелькает «повторов нет», хотя их ещё никто не искал
+        state.report.semantic = { state: s.semantic ? 'run' : 'off', msg: 'Готовлю…' };
+        Report.render($('#results'), text, state.report, renderOpts());
         $('#results-actions').hidden = false;
-        $('#humanize-card').hidden = false;
         $('#humanize-out').innerHTML = '';
         $('#results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        runSemantic();
       } catch (e) {
         note('Ошибка анализа: ' + e.message, 'err');
         if (window.console) console.error(e);
       }
-      btn.disabled = false; btn.textContent = 'Проверить на ИИ';
+      btn.disabled = false; btn.textContent = 'Проверить';
     }, 30);
   }
 
@@ -206,6 +377,7 @@
       source: state.source,
       options: {
         comments: $('#opt-comments').checked,
+        sentences: $('#opt-sent').checked,
         human: $('#opt-human').checked,
         appendix: $('#opt-appendix').checked
       }
@@ -283,7 +455,25 @@
 
   /* ---------------- инициализация ---------------- */
 
+  /* окно «О детекторе»: версия и история изменений из js/version.js */
+  function initAbout() {
+    var V = window.DetectorVersion;
+    if (!V) return;
+    $('#brand-ver').textContent = 'v' + V.version;
+    $('#about-title').textContent = V.full;
+    $('#about-date').textContent = 'Версия от ' + V.date;
+    $('#about-changes').innerHTML = V.changes.map(function (c) {
+      return '<div class="about-ver"><b>v' + c.v + '</b><span class="muted">' + c.date + '</span><ul>' +
+        c.items.map(function (x) { return '<li>' + escHtml(x) + '</li>'; }).join('') + '</ul></div>';
+    }).join('');
+    var dlg = $('#about');
+    $('#about-btn').onclick = function () { if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', ''); };
+    $('#about-close').onclick = function () { dlg.close ? dlg.close() : dlg.removeAttribute('open'); };
+    dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
+  }
+
   function init() {
+    initAbout();
     applySettingsToUi(loadSettings());
     var theme = 'auto';
     try { theme = localStorage.getItem('aidet_theme') || 'auto'; } catch (e) {}
@@ -301,7 +491,12 @@
       updateCounter();
     });
     $('#check-btn').onclick = runCheck;
-    $('#clear-btn').onclick = function () { setText(''); $('#results').innerHTML = ''; $('#results-actions').hidden = true; $('#humanize-card').hidden = true; };
+    $('#clear-btn').onclick = function () {
+      semRun++;   // отменяем незаконченный счёт повторов
+      state.report = null; state.prev = null;
+      setText(''); $('#results').innerHTML = '';
+      $('#results-actions').hidden = true;
+    };
     $('#sample-ai').onclick = function () { setText(SAMPLE_AI, 'Вставлен пример типичного ИИ-текста'); };
     $('#sample-human').onclick = function () { setText(SAMPLE_HUMAN, 'Вставлен пример живого текста'); };
 
@@ -334,7 +529,8 @@
     });
 
     $('#dl-json').onclick = function () {
-      download('ai-report-' + stamp() + '.json', Report.buildJson(state.text, state.report, state.generatedAt), 'application/json');
+      var base = (state.fileName || '').replace(/\.[a-z0-9]+$/i, '').trim().slice(0, 60) || stamp();
+      download('для нейросети — ' + base + '.json', Report.buildJson(state.text, state.report, state.generatedAt), 'application/json');
     };
     $('#dl-md').onclick = function () {
       download('ai-report-' + stamp() + '.md', Report.buildMarkdown(state.text, state.report, state.generatedAt), 'text/markdown');
@@ -343,8 +539,15 @@
     $('#copy-prompt').onclick = function () {
       copyText(Report.buildClaudePrompt(state.report, true) + '\n\nТекст:\n' + state.text, this);
     };
-    $('#hum-safe').onclick = function () { runHumanize('safe'); };
-    $('#hum-aggr').onclick = function () { runHumanize('aggressive'); };
+    $('#dl-client').onclick = function () {
+      var html = Report.buildClientHtml($('#results'), state.report, {
+        fileName: state.fileName, generatedAt: state.generatedAt, threshold: readSettingsFromUi().threshold
+      });
+      download('отчёт-' + ((state.fileName || '').replace(/\.[a-z0-9]+$/i, '') || stamp()) + '.html', html, 'text/html');
+    };
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="profile"]'), function (r) {
+      r.addEventListener('change', profileHint);
+    });
 
     updateCounter();
   }

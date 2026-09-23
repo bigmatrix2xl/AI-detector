@@ -145,7 +145,14 @@
     for (var i = 0; i < entries.length; i++) {
       var e = entries[i];
       if (whitelist && whitelist.indexOf(e.p) !== -1) continue;
-      var re = cachedRegex(kind + '::' + e.p, e.p, 2);
+      // Синтаксические шаблоны («не X, а Y») словарной фразой не описать,
+      // поэтому у таких записей вместо p готовое выражение re.
+      var re;
+      if (e.re) {
+        if (!regexCache['re::' + e.re]) regexCache['re::' + e.re] = new RegExp(e.re, 'giu');
+        re = regexCache['re::' + e.re];
+        re.lastIndex = 0;
+      } else re = cachedRegex(kind + '::' + e.p, e.p, 2);
       var m;
       while ((m = re.exec(lowerText)) !== null) {
         hits.push({
@@ -200,6 +207,42 @@
     balanced: { mult: 1.0,  shift: 0,  seg: [72, 55, 38], name: 'Сбалансированный' },
     soft:     { mult: 0.87, shift: -3, seg: [78, 61, 43], name: 'Мягкий' }
   };
+
+  /* -------- посентенс-модуль (js/sentences.js) -------- */
+  function getSentencesModule() {
+    if (typeof Sentences !== 'undefined' && Sentences && Sentences.analyze) return Sentences;
+    if (typeof self !== 'undefined' && self.Sentences) return self.Sentences;
+    if (typeof require === 'function') {
+      try { return require('./sentences.js'); } catch (e) { /* нет — работаем без него */ }
+    }
+    return null;
+  }
+
+  /* ---------------- калибровка шкалы ----------------
+   * Проблема, которую это чинит: восемь метрик из девяти на живом
+   * профессиональном тексте дают почти одно и то же значение. Их сумма —
+   * постоянный фон ~21 балл, из-за которого начисто вычищенный текст
+   * показывал 24-30 вместо честного нуля, а разница между текстами тонула.
+   *
+   * NEUTRAL — медиана метрики на эталонном корпусе из 13 готовых кейсов и
+   * статей «Доминиона» (тексты, прошедшие внешние детекторы с большим
+   * запасом: ZeroGPT 0-3.9%). Это и есть «нормально написанный деловой
+   * текст». Сигнал, равный опорному, даёт NEUTRAL_OUT баллов, а не свои
+   * сырые 63.
+   *
+   * Сырой signal никуда не девается: он остаётся в отчёте и в объяснениях,
+   * меняется только вклад в итог и цвет метрики.
+   */
+  var NEUTRAL = { cliches: 2, rhythm: 25, starters: 17, bureaucratic: 20,
+    structure: 19, paragraphs: 4, punctuation: 32, lexical: 19, specificity: 63 };
+  var NEUTRAL_OUT = 10;
+
+  function calibrate(signal, key) {
+    var n = NEUTRAL[key];
+    if (n === undefined) return signal;
+    if (signal <= n) return n ? (signal / n) * NEUTRAL_OUT : NEUTRAL_OUT;
+    return NEUTRAL_OUT + (signal - n) / (100 - n) * (100 - NEUTRAL_OUT);
+  }
 
   /* ---------------- метрики ---------------- */
 
@@ -515,11 +558,13 @@
         explain: 'Личный опыт, цифры, даты, цитаты, разговорные обороты. Чем их меньше — тем «мертвее» текст.' }
     ];
 
+    var calibrated = options.calibrated === false ? false : true;
     var wSum = 0, sSum = 0, signals = [];
     METRICS.forEach(function (M) {
       var we = M.w * M.m.reliability;
-      wSum += we; sSum += M.m.signal * we;
-      signals.push(M.m.signal);
+      M.rel = calibrated ? calibrate(M.m.signal, M.key) : M.m.signal;
+      wSum += we; sSum += M.rel * we;
+      signals.push(M.rel);
     });
     var raw = wSum ? sSum / wSum : 50;
     var aiScore = clamp(Math.round(raw * profile.mult + profile.shift), 0, 100);
@@ -553,11 +598,15 @@
       var c4 = metricBureaucratic(sLower, sWords, burList, lang);
       var c5 = metricSpecificity(sg.text, sLower, sWords, sHuman);
       var parts = [
-        { m: c1, w: 0.32 }, { m: c2, w: 0.16 }, { m: c3, w: 0.14 },
-        { m: c4, w: 0.16 }, { m: c5, w: 0.22 }
+        { m: c1, w: 0.32, k: 'cliches' }, { m: c2, w: 0.16, k: 'rhythm' },
+        { m: c3, w: 0.14, k: 'starters' }, { m: c4, w: 0.16, k: 'bureaucratic' },
+        { m: c5, w: 0.22, k: 'specificity' }
       ];
       var ws = 0, ss = 0;
-      parts.forEach(function (p) { var we = p.w * p.m.reliability; ws += we; ss += p.m.signal * we; });
+      parts.forEach(function (p) {
+        var we = p.w * p.m.reliability;
+        ws += we; ss += (calibrated ? calibrate(p.m.signal, p.k) : p.m.signal) * we;
+      });
       var score = clamp(Math.round((ws ? ss / ws : 50) * profile.mult + profile.shift), 0, 100);
       var label = score >= profile.seg[0] ? 'AI' : score >= profile.seg[1] ? 'LIKELY_AI' : score >= profile.seg[2] ? 'LIKELY_HUMAN' : 'HUMAN';
       var reasons = [];
@@ -577,21 +626,25 @@
     var dist = { AI: 0, LIKELY_AI: 0, LIKELY_HUMAN: 0, HUMAN: 0 };
     segments.forEach(function (s) { dist[s.label]++; });
 
-    /* --- тепловая карта предложений --- */
-    var heat = sentences.filter(function (s) { return countWords(s.text) >= 2; }).map(function (s) {
-      var seg = null;
-      for (var i = 0; i < segments.length; i++) {
-        if (s.start >= segments[i].start && s.start < segments[i].end) { seg = segments[i]; break; }
-      }
-      var local = seg ? seg.score * 0.55 : 30;
-      var inHits = hits.filter(function (h) { return h.start >= s.start && h.start < s.end; });
-      inHits.forEach(function (h) { local += h.w * 6; });
-      var t = s.text.toLowerCase().replace(/^["«\-–—\d.)\s#*]+/, '');
-      for (var j = 0; j < starters.length; j++) { if (t.indexOf(starters[j]) === 0) { local += 12; break; } }
-      var inHuman = humanHits.filter(function (h) { return h.start >= s.start && h.start < s.end; });
-      local -= inHuman.length * 8;
-      return { start: s.start, end: s.end, score: clamp(Math.round(local), 0, 100), preview: s.text.slice(0, 140) };
-    });
+    /* --- разбор по предложениям ---
+     * Раньше здесь был балл сегмента, размазанный по его предложениям: без
+     * словарного совпадения все предложения получали одно и то же число, и
+     * карта ничего не показывала. Теперь у каждого предложения свои признаки
+     * и свой список причин — см. js/sentences.js.
+     */
+    var SentMod = getSentencesModule();
+    var heat;
+    if (SentMod) {
+      heat = SentMod.analyze(text, sentences, {
+        hits: hits, burHits: burHits, starterHits: starterHits
+      });
+    } else {
+      // запасной путь, если sentences.js не подключён
+      heat = sentences.filter(function (s) { return countWords(s.text) >= 2; }).map(function (s) {
+        return { start: s.start, end: s.end, score: 0, level: 'HUMAN', reasons: [],
+                 preview: s.text.slice(0, 160) };
+      });
+    }
 
     /* --- рекомендации и сильные стороны --- */
     var recommendations = [];
@@ -604,7 +657,7 @@
       var listed = Object.keys(topHits).slice(0, 8).join(', ');
       rec(mCliche.signal >= 60 ? 'high' : 'medium', 'Убрать штампы ИИ',
         'Найдено ' + hits.length + ' совпадений с базой клише: ' + listed +
-        '. Каждое либо удалите, либо замените конкретным фактом. Кнопка «Очеловечить» сделает безопасные замены автоматически.');
+        '. Каждое либо удалите, либо замените конкретным фактом.');
     } else if (hits.length === 0) strengths.push('Штампов ИИ из базы не найдено — отлично.');
     else strengths.push('Штампов мало (' + hits.length + ') — хороший результат.');
 
@@ -651,12 +704,14 @@
         chars: chars, words: words, sentences: sentences.length,
         lang: lang, profile: options.profile || 'balanced', profileName: profile.name,
         segmentSize: segmentSize, markdownAware: markdownAware,
-        engine: 'AI-Detector local v1', deterministic: true
+        engine: (typeof self !== 'undefined' && self.DetectorVersion) ? self.DetectorVersion.full : 'ИИ Детектор Пылова', deterministic: true, calibrated: calibrated
       },
       overall: { aiScore: aiScore, humanScore: 100 - aiScore, verdict: verdict, verdictKey: verdictKey, confidence: confidence, confidenceNote: confidenceNote },
       metrics: METRICS.map(function (M) {
-        var st = M.m.signal >= 55 ? 'bad' : M.m.signal >= 35 ? 'warn' : 'good';
-        return { key: M.key, title: M.title, weight: M.w, signal: Math.round(M.m.signal), reliability: Math.round(M.m.reliability * 100) / 100, status: st, value: M.m.value, detail: M.m.detail, explain: M.explain };
+        var st = M.rel >= 55 ? 'bad' : M.rel >= 35 ? 'warn' : 'good';
+        return { key: M.key, title: M.title, weight: M.w, signal: Math.round(M.m.signal),
+          relative: Math.round(M.rel), neutral: NEUTRAL[M.key],
+          reliability: Math.round(M.m.reliability * 100) / 100, status: st, value: M.m.value, detail: M.m.detail, explain: M.explain };
       }),
       segments: segments,
       distribution: dist,

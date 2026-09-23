@@ -25,13 +25,20 @@
 (function (root) {
   'use strict';
 
+  function versionName() {
+    var g = (typeof self !== 'undefined') ? self : {};
+    return (g.DetectorVersion && g.DetectorVersion.full) || 'ИИ Детектор Пылова';
+  }
+
   var DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   var NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
   var REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
   // Цвета подсветки Word (w:highlight) под типы находок
-  var HIGHLIGHT = { ai: 'red', starter: 'cyan', bur: 'yellow', human: 'green' };
+  // sent — бледно-серая заливка под всё предложение: на её фоне яркие
+  // пометки на словах остаются различимыми
+  var HIGHLIGHT = { ai: 'red', starter: 'cyan', bur: 'yellow', human: 'green', sent: 'lightGray' };
   var COMMENT_LIMIT = 300;      // предохранитель: Word тяжело открывает тысячи примечаний
   var SAME_PHRASE_LIMIT = 3;    // одну и ту же фразу комментируем первые N раз, дальше только подсветка
 
@@ -162,7 +169,7 @@
       var paras = String(c.body).split('\n').map(function (ln) {
         return '<w:p><w:r><w:t xml:space="preserve">' + escXml(ln) + '</w:t></w:r></w:p>';
       }).join('');
-      return '<w:comment w:id="' + (startId + c.id) + '" w:author="AI-детектор" w:initials="AI" w:date="' +
+      return '<w:comment w:id="' + (startId + c.id) + '" w:author="ИИ Детектор Пылова" w:initials="ИДП" w:date="' +
         date + '">' + paras + '</w:comment>';
     }).join('');
     if (existingXml && existingXml.indexOf('</w:comments>') !== -1) {
@@ -554,18 +561,20 @@
     ['ai', 'штамп ИИ', 'заменить или удалить: сухая формула вместо конкретики'],
     ['starter', 'шаблонное начало', 'переписать: начните с сути — существительного, глагола, цифры или вопроса'],
     ['bur', 'канцелярит', 'оживить активным глаголом: «доставляем» вместо «осуществляется доставка»'],
-    ['human', 'живой маркер', 'НЕ трогать: это как раз то, что делает текст человеческим']
+    ['human', 'живой маркер', 'НЕ трогать: это как раз то, что делает текст человеческим'],
+    ['sent', 'предложение целиком', 'переписать своими словами: предложение набрало машинные признаки']
   ];
 
   function legendBlock(counts, report, options) {
     var x = '';
-    x += blockPara(textRun('Документ размечен AI-детектором — правки для копирайтера', { b: true, sz: 26 }),
+    x += blockPara(textRun('Документ размечен: ' + versionName() + ' — правки для копирайтера', { b: true, sz: 26 }),
       { after: 60, border: true });
-    x += line('Вердикт: ' + report.overall.verdict + ' · AI-сигнал ' + report.overall.aiScore +
-      '/100 · человечность ' + report.overall.humanScore + '%.', { i: true }, { after: 140 });
+    x += line('Вердикт: ' + report.overall.verdict + ' · балл ИИ ' + report.overall.aiScore +
+      ' из 100.', { i: true }, { after: 140 });
     x += blockPara(textRun('Как читать пометки:', { b: true }), { after: 60 });
     LEGEND_ROWS.forEach(function (r) {
       if (r[0] === 'human' && !options.human) return;
+      if (r[0] === 'sent' && options.sentences === false) return;
       x += blockPara(
         textRun(' ' + r[1] + ' ', null, HIGHLIGHT[r[0]]) +
         textRun('  — ' + r[2] + '. Найдено: ' + (counts[r[0]] || 0) + '.', null),
@@ -583,10 +592,9 @@
   function reportBlock(report, opts) {
     var PRIO = { high: 'Важно', medium: 'Желательно', low: 'Штрих' };
     var x = '';
-    x += blockPara(textRun('Отчёт AI-детектора', { b: true, sz: 32 }), { pageBreak: true, after: 140 });
+    x += blockPara(textRun('Отчёт: ' + versionName(), { b: true, sz: 32 }), { pageBreak: true, after: 140 });
     x += line('Вердикт: ' + report.overall.verdict, { b: true });
-    x += line('AI-сигнал: ' + report.overall.aiScore + '/100, человечность ' + report.overall.humanScore +
-      '%. Уверенность оценки: ' + report.overall.confidence + '.');
+    x += line('Балл ИИ: ' + report.overall.aiScore + ' из 100. Уверенность оценки: ' + report.overall.confidence + '.');
     x += line('Объём: ' + report.meta.words + ' слов, ' + report.meta.chars + ' символов. Профиль: ' + report.meta.profileName + '.');
     x += line('Дата проверки: ' + new Date(opts.generatedAt || Date.now()).toLocaleString('ru-RU') + '.',
       { i: true }, { after: 200 });
@@ -623,7 +631,7 @@
       });
     }
 
-    x += line('Отчёт сформирован локальным AI-детектором. Ни один детектор не является доказательством авторства — ' +
+    x += line('Отчёт сформирован локально: ' + versionName() + '. Ни один детектор не является доказательством авторства — ' +
       'используйте пометки как рабочий инструмент редактуры.', { i: true, sz: 20 }, { before: 240 });
     return x;
   }
@@ -664,14 +672,14 @@
    * opts = {
    *   text, report, generatedAt,
    *   source: { kind:'docx', buffer, text } | { kind:'rich', rich } | null,
-   *   options: { comments:true, human:true, appendix:true }
+   *   options: { comments:true, human:true, appendix:true, sentences:true }
    * }
    */
   function build(opts) {
-    var options = { comments: true, human: true, appendix: true, legend: true };
+    var options = { comments: true, human: true, appendix: true, legend: true, sentences: true };
     Object.keys(opts.options || {}).forEach(function (k) { options[k] = opts.options[k]; });
 
-    var marks = root.Report.buildMarks(opts.report, { human: options.human });
+    var marks = root.Report.buildMarks(opts.report, { human: options.human, sentences: options.sentences !== false });
     var counts = countKinds(marks);
     var src = opts.source;
     var canUseOriginal = src && src.kind === 'docx' && src.buffer && src.text === opts.text;

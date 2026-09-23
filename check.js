@@ -61,7 +61,10 @@ function fromDocx(file) {
       if (!t.trim()) continue;
       text += t;
       total++;
-      if (/<w:i\/>|<w:i\s/.test(r)) italic++;
+      // <w:i w:val="0"/> — это явно выключенный курсив, а не курсив: Word и
+      // генераторы документов пишут его в обычный текст, и раньше такие абзацы
+      // целиком улетали в служебные.
+      if (/<w:i\/>|<w:i\s(?![^>]*w:val="(?:0|false|off)")/.test(r)) italic++;
     }
 
     text = text
@@ -92,23 +95,67 @@ const text = file.toLowerCase().endsWith('.docx')
 
 const r = det.analyze(text, kb, { profile });
 
+/* Смысловые повторы — те же, что в браузере: модель rubert-tiny2 лежит в
+   model/ и грузится за полсекунды. Нет файла модели — раздел пропускаем. */
+function semanticRepeats(text) {
+  const MODEL = path.join(ENGINE, 'model', 'rubert-tiny2.js');
+  if (!fs.existsSync(MODEL)) return Promise.resolve(null);
+  global.self = global;
+  require(MODEL);
+  require(path.join(ENGINE, 'js', 'wordpiece.js'));
+  require(path.join(ENGINE, 'js', 'bert.js'));
+  const Semantic = require(path.join(ENGINE, 'js', 'semantic.js'));
+  return Semantic.findRepeats(det.splitSentences(text)).catch(() => null);
+}
+
+semanticRepeats(text).then(reps => { r.semantic_repeats = reps; main(); });
+
+function main() {
 if (asJson) {
+  // без process.exit: в трубу stdout пишется асинхронно, и выход обрезал бы JSON
   console.log(JSON.stringify({ file: path.basename(file), profile, result: r, text }, null, 1));
-  process.exit(0);
+  return;
 }
 
 const bar = n => '█'.repeat(Math.round(n / 5)).padEnd(20, '·');
 
-console.log(`\nФайл: ${path.basename(file)}   профиль: ${profile}`);
+const VER = require(path.join(ENGINE, 'js', 'version.js'));
+console.log(`\n${VER.full}`);
+console.log(`Файл: ${path.basename(file)}   профиль: ${profile}`);
 console.log(`Слов в публикуемом тексте: ${det.countWords(text)}\n`);
-console.log(`AI-сигнал: ${r.overall.aiScore}/100 — ${r.overall.verdict}`);
+console.log(`Балл ИИ: ${r.overall.aiScore}/100 — ${r.overall.verdict}`);
 console.log(`Уверенность: ${r.overall.confidence}\n`);
 
-console.log('МЕТРИКИ');
+console.log('МЕТРИКИ  (сырой сигнал → относительно нормы делового текста)');
 for (const m of r.metrics) {
   const mark = m.status === 'bad' ? '✗' : m.status === 'warn' ? '~' : '✓';
-  console.log(`  ${mark} ${String(m.signal).padStart(3)}  ${bar(m.signal)}  ${m.title}`);
+  const rel = m.relative === undefined ? m.signal : m.relative;
+  const norm = m.neutral === undefined ? '' : `  норма ~${m.neutral}`;
+  console.log(`  ${mark} ${String(m.signal).padStart(3)} → ${String(rel).padStart(3)}  ${bar(rel)}  ${m.title}${norm}`);
   if (m.detail) console.log(`         ${m.detail}`);
+}
+
+/* Предложения — главное, по чему правится текст: детектор называет
+   конкретную фразу и причину, а не только метрику по всему документу. */
+const flagged = (r.heat || []).filter(h => h.level === 'AI' || h.level === 'LIKELY_AI');
+if (flagged.length) {
+  console.log(`\nПРЕДЛОЖЕНИЯ, КОТОРЫЕ НАДО ПЕРЕПИСАТЬ (${flagged.length})`);
+  flagged.sort((a, b) => b.score - a.score).slice(0, 30).forEach((h, i) => {
+    const why = h.reasons.filter(x => !x.editorial && x.code !== 'ok').map(x => x.title.toLowerCase());
+    console.log(`  ${String(i + 1).padStart(2)}. [${String(h.score).padStart(2)}/100] ${h.preview.replace(/\s+/g, ' ').slice(0, 96)}`);
+    console.log(`      ${why.join(', ')}`);
+  });
+} else {
+  console.log('\nПРЕДЛОЖЕНИЯ: машинных предложений не найдено.');
+}
+
+const notes = (r.heat || []).filter(h => (h.reasons || []).some(x => x.editorial));
+if (notes.length) {
+  console.log(`\nЗАМЕТКИ РЕДАКТОРУ (${notes.length}) — на ИИ не указывают, но стоит посмотреть`);
+  notes.slice(0, 10).forEach(h => {
+    const t = h.reasons.filter(x => x.editorial).map(x => x.title.toLowerCase()).join(', ');
+    console.log(`  • ${t}: ${h.preview.replace(/\s+/g, ' ').slice(0, 88)}`);
+  });
 }
 
 console.log('\nСЕГМЕНТЫ');
@@ -143,4 +190,19 @@ if (r.strengths.length) {
   console.log('\nСИЛЬНЫЕ СТОРОНЫ');
   r.strengths.forEach(x => console.log(`  + ${x.title || x.text || x}`));
 }
+const reps = r.semantic_repeats;
+if (reps === null) {
+  console.log('\nСМЫСЛОВЫЕ ПОВТОРЫ: не проверялись — нет файла модели model/rubert-tiny2.js');
+} else if (!reps.length) {
+  console.log('\nСМЫСЛОВЫЕ ПОВТОРЫ: не найдено.');
+} else {
+  console.log(`\nСМЫСЛОВЫЕ ПОВТОРЫ (${reps.length}) — одна мысль сказана дважды; на ИИ не указывает, но текст раздувает`);
+  const cut = t => t.replace(/\s+/g, ' ').slice(0, 90);
+  reps.slice(0, 12).forEach((p, i) => {
+    console.log(`  ${String(i + 1).padStart(2)}. [${p.level === 'strong' ? 'почти одно и то же' : 'стоит посмотреть'}, ${p.score}]`);
+    console.log(`      «${cut(p.a.text)}»`);
+    console.log(`      «${cut(p.b.text)}»`);
+  });
+}
 console.log('');
+}
