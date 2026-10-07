@@ -232,14 +232,12 @@
     if (typeof Semantic === 'undefined') {
       state.report.semantic = { state: 'off', why: 'модуль js/semantic.js не загружен' };
       rerender();
-      logCheck();
       return;
     }
     if (!readSettingsFromUi().semantic) {
       state.report.semantic = { state: 'off' };
       state.report.repeats = [];
       rerender();
-      logCheck();
       return;
     }
     state.report.semantic = {
@@ -261,13 +259,11 @@
         backend: Semantic.backend()
       };
       rerender();
-      logCheck();
     }).catch(function (e) {
       if (token !== semRun) return;
       state.report.repeats = [];
       state.report.semantic = { state: 'error', msg: e && e.message ? e.message : String(e) };
       rerender();
-      logCheck();
       if (window.console) console.error(e);
     });
   }
@@ -279,7 +275,8 @@
     DetectorLog[fn].apply(null, Array.prototype.slice.call(arguments, 1));
   }
 
-  // Одна запись на проверку, с полным отчётом для заказчика (текст с подсветкой)
+  // Одна запись на проверку, с полным отчётом для заказчика (текст с подсветкой).
+  // Смысловые повторы к этому моменту ещё не посчитаны — в запись не входят.
   function logCheck() {
     if (typeof DetectorLog === 'undefined' || !DetectorLog.enabled()) return;
     if (!state.report || state.loggedAt === state.generatedAt) return;
@@ -294,7 +291,6 @@
       ok: Report.acceptance(r, s.threshold).ok,
       flagged: r.heat.filter(function (h) { return h.level === 'AI' || h.level === 'LIKELY_AI'; }).length,
       hits: r.hits.length,
-      repeats: (r.repeats || []).length,
       start: (function (t) { return t.length > 200 ? t.slice(0, 200).replace(/\s+\S*$/, '') + '…' : t; })(state.text.replace(/\s+/g, ' ').trim()),
       reportName: base + ' — ' + stamp() + '.html',
       reportHtml: Report.buildClientHtml($('#results'), r, { fileName: state.fileName, generatedAt: state.generatedAt, threshold: s.threshold })
@@ -329,6 +325,7 @@
         Report.render($('#results'), text, state.report, renderOpts());
         $('#results-actions').hidden = false;
         $('#humanize-out').innerHTML = '';
+        logCheck();   // сразу, не дожидаясь повторов: вкладку могут закрыть раньше
         $('#results-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
         runSemantic();
       } catch (e) {

@@ -127,7 +127,7 @@
       send('🔎 ' + who() + ' проверил ' + (c.fileName ? '«' + esc(c.fileName) + '»' : 'текст из поля') + '\n' +
         num(c.words) + ' слов · строгость: ' + esc(c.profile) + '\n' +
         '<b>Балл ИИ ' + c.score + ' из 100 · ' + (c.ok ? 'можно сдавать' : 'на доработку') + '</b>\n' +
-        'Машинных предложений: ' + c.flagged + ' · штампов: ' + c.hits + ' · смысловых повторов: ' + c.repeats + '\n' +
+        'Машинных предложений: ' + c.flagged + ' · штампов: ' + c.hits + '\n' +
         'Начало: «' + esc(c.start) + '»',
         { name: c.reportName, blob: new Blob([c.reportHtml], { type: 'text/html' }) });
     },
