@@ -85,7 +85,8 @@
         '<input id="auth-pass" name="password" type="password" autocomplete="current-password" required>' +
         '<p class="auth-err" id="auth-err" role="alert"></p>' +
         '<button class="pill primary lg" type="submit">Войти</button>' +
-        '<p class="field-hint">Логин и пароль выдаёт администратор.</p>' +
+        '<p class="field-hint">Логин и пароль выдаёт администратор:<br>' +
+          '<a href="https://t.me/bigmatrix2xl" target="_blank" rel="noopener">@bigmatrix2xl</a> в Telegram</p>' +
       '</form>';
     document.body.insertBefore(gate, document.body.firstChild);
 

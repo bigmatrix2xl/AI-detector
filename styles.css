@@ -558,3 +558,5 @@ html.auth-locked body > :not(#auth-gate) { display: none !important; }
 .auth-user { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; font-size: 13px; margin-right: 4px; }
 .auth-user span { color: var(--muted); font-size: 12px; }
 @media (max-width: 720px) { .auth-user { display: none; } }
+.auth-card .field-hint a { color: var(--accent); font-weight: 600; text-decoration: none; }
+.auth-card .field-hint a:hover { text-decoration: underline; }

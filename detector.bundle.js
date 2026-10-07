@@ -39,10 +39,13 @@ https://github.com/nodeca/pako/blob/main/LICENSE
   'use strict';
   var V = {
     name: 'ИИ Детектор Пылова',
-    version: '2.2',
+    version: '2.3',
     date: '7 октября 2026',
     // коротко — для окна «О детекторе»; подробно — в CHANGELOG.md
     changes: [
+      { v: '2.3', date: '07.10.2026', items: [
+        'На форме входа — контакт администратора в Telegram'
+      ] },
       { v: '2.2', date: '07.10.2026', items: [
         'Вход по логину и паролю: админ, работник, гость'
       ] },
