@@ -52,9 +52,11 @@
   function login(u) {
     try { localStorage.setItem(KEY, JSON.stringify({ login: u.login, sig: u.hash.slice(0, 16), until: Date.now() + DAYS * 864e5 })); } catch (e) {}
   }
+  function log(fn, arg) { var L = self.DetectorLog; if (L) L[fn](arg); }
   function logout() {
+    log('logout');
     try { localStorage.removeItem(KEY); } catch (e) {}
-    location.reload();
+    (self.DetectorLog ? self.DetectorLog.flush() : Promise.resolve()).then(function () { location.reload(); });
   }
 
   var user = current();
@@ -85,7 +87,8 @@
         '<input id="auth-pass" name="password" type="password" autocomplete="current-password" required>' +
         '<p class="auth-err" id="auth-err" role="alert"></p>' +
         '<button class="pill primary lg" type="submit">Войти</button>' +
-        '<p class="field-hint">Логин и пароль выдаёт администратор:<br>' +
+        '<p class="field-hint">Вход, проверки и загруженные тексты записываются в журнал.<br>' +
+          'Логин и пароль выдаёт администратор:<br>' +
           '<a href="https://t.me/bigmatrix2xl" target="_blank" rel="noopener">@bigmatrix2xl</a> в Telegram</p>' +
       '</form>';
     document.body.insertBefore(gate, document.body.firstChild);
@@ -102,11 +105,13 @@
       check(l, p).then(function (u) {
         if (!u) {
           // пауза против перебора с клавиатуры
+          log('loginFailed', l.trim());
           setTimeout(function () { btn.disabled = false; err.textContent = 'Неверный логин или пароль'; form.password.select(); }, 600);
           return;
         }
         login(u);
         user = u;
+        log('login');
         gate.remove();
         document.documentElement.classList.remove('auth-locked');
         showUser();

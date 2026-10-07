@@ -4,11 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ИИ Детектор Пылова — проверка текста на ИИ</title>
-<meta name="description" content="Локальный детектор ИИ-текста: штампы, ритм, канцелярит, смысловые повторы. Работает в браузере, текст никуда не уходит.">
+<meta name="description" content="Локальный детектор ИИ-текста: штампы, ритм, канцелярит, смысловые повторы. Работает в браузере.">
 <link rel="stylesheet" href="styles.css">
 <script src="js/version.js"></script>
 <script src="js/users.js"></script>
 <script src="js/auth.js"></script>
+<script src="js/log.js"></script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='16' fill='%23111113'/><text x='32' y='42' text-anchor='middle' font-family='system-ui,sans-serif' font-size='26' font-weight='700' fill='white'>AI</text></svg>">
 </head>
 <body>
@@ -18,7 +19,7 @@
     <span class="brand-mark">AI</span>
     <div>
       <div class="brand-name">ИИ Детектор Пылова <span class="brand-ver" id="brand-ver"></span></div>
-      <div class="brand-sub">Работает в браузере · текст никуда не уходит</div>
+      <div class="brand-sub">Проверка прямо в браузере</div>
     </div>
   </div>
   <div class="top-actions">
@@ -38,7 +39,7 @@
     </div>
     <button class="icon-btn" type="button" id="about-close" aria-label="Закрыть">✕</button>
   </div>
-  <p>Проверяет текст на признаки нейросети прямо в браузере: текст никуда не отправляется, лимитов нет. Одинаковый текст всегда получает одинаковый балл.</p>
+  <p>Проверяет текст на признаки нейросети прямо в браузере, без лимитов. Вход, проверки и выгрузки записываются в журнал администратора. Одинаковый текст всегда получает одинаковый балл.</p>
   <div class="eyebrow">Что нового</div>
   <div id="about-changes"></div>
 </dialog>

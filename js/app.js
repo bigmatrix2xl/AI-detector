@@ -112,6 +112,7 @@
     var file = files[0];
     note('Читаю «' + file.name + '»…');
     FileLoader.read(file).then(function (res) {
+      log('file', file, res.text.length);
       setText(res.text, 'Загружено из «' + res.name + '»: ' + res.text.length.toLocaleString('ru-RU') + ' символов' +
         (res.source && res.source.kind === 'docx' ? '. Оформление сохранено — сможете скачать этот же файл с пометками' : '') +
         (res.warnings.length ? '. ' + res.warnings.join(' ') : ''),
@@ -148,6 +149,7 @@
           profile: s.profile, lang: s.lang, segmentSize: s.segmentSize, markdownAware: s.markdownAware, whitelist: whitelist
         });
         batch.push({ name: f.name, text: res.text, source: res.source, report: rep });
+        log('file', f, res.text.length);
       }).catch(function (err) {
         batch.push({ name: f.name, error: err && err.message ? err.message : 'не удалось прочитать' });
       }).then(function () { setTimeout(next, 0); });
@@ -171,6 +173,9 @@
         '<td class="num">' + aiSeg + '</td></tr>';
     }).join('');
     var okN = batch.filter(function (b) { return !b.error && Report.acceptance(b.report, threshold).ok; }).length;
+    log('batch', batch.map(function (b) {
+      return b.error ? { name: b.name, error: b.error } : { name: b.name, score: b.report.overall.aiScore, ok: Report.acceptance(b.report, threshold).ok };
+    }), okN);
     $('#results').innerHTML = '<div class="panel batch">' +
       '<div class="panel-head"><div><div class="eyebrow">Пакетная проверка · порог ' + threshold + '</div>' +
       '<h2>' + batch.length + ' ' + (batch.length < 5 ? 'файла' : 'файлов') + ' · можно сдавать ' + okN + '</h2></div>' +
@@ -190,6 +195,7 @@
       tr.onkeydown = function (e) { if (e.key === 'Enter') open(tr); };
     });
     $('#batch-csv').onclick = function () {
+      log('action', 'скачал таблицу пакетной проверки (CSV)');
       var head = 'Файл;Слов;Балл;Оценка;Решение;К правке;Штампы;ИИ-сегментов';
       var lines = batch.filter(function (b) { return !b.error; }).map(function (b) {
         var r = b.report, acc = Report.acceptance(r, threshold);
@@ -226,12 +232,14 @@
     if (typeof Semantic === 'undefined') {
       state.report.semantic = { state: 'off', why: 'модуль js/semantic.js не загружен' };
       rerender();
+      logCheck();
       return;
     }
     if (!readSettingsFromUi().semantic) {
       state.report.semantic = { state: 'off' };
       state.report.repeats = [];
       rerender();
+      logCheck();
       return;
     }
     state.report.semantic = {
@@ -253,12 +261,43 @@
         backend: Semantic.backend()
       };
       rerender();
+      logCheck();
     }).catch(function (e) {
       if (token !== semRun) return;
       state.report.repeats = [];
       state.report.semantic = { state: 'error', msg: e && e.message ? e.message : String(e) };
       rerender();
+      logCheck();
       if (window.console) console.error(e);
+    });
+  }
+
+  /* ---------------- журнал ---------------- */
+
+  function log(fn) {
+    if (typeof DetectorLog === 'undefined' || !DetectorLog.enabled()) return;
+    DetectorLog[fn].apply(null, Array.prototype.slice.call(arguments, 1));
+  }
+
+  // Одна запись на проверку, с полным отчётом для заказчика (текст с подсветкой)
+  function logCheck() {
+    if (typeof DetectorLog === 'undefined' || !DetectorLog.enabled()) return;
+    if (!state.report || state.loggedAt === state.generatedAt) return;
+    state.loggedAt = state.generatedAt;
+    var r = state.report, s = readSettingsFromUi();
+    var base = (state.fileName || '').replace(/\.[a-z0-9]+$/i, '').trim().slice(0, 60) || 'текст';
+    log('check', {
+      fileName: state.fileName,
+      words: r.meta.words,
+      profile: { strict: 'строго', balanced: 'обычно', soft: 'мягко' }[s.profile] || s.profile,
+      score: r.overall.aiScore,
+      ok: Report.acceptance(r, s.threshold).ok,
+      flagged: r.heat.filter(function (h) { return h.level === 'AI' || h.level === 'LIKELY_AI'; }).length,
+      hits: r.hits.length,
+      repeats: (r.repeats || []).length,
+      start: (function (t) { return t.length > 200 ? t.slice(0, 200).replace(/\s+\S*$/, '') + '…' : t; })(state.text.replace(/\s+/g, ' ').trim()),
+      reportName: base + ' — ' + stamp() + '.html',
+      reportHtml: Report.buildClientHtml($('#results'), r, { fileName: state.fileName, generatedAt: state.generatedAt, threshold: s.threshold })
     });
   }
 
@@ -294,6 +333,7 @@
         runSemantic();
       } catch (e) {
         note('Ошибка анализа: ' + e.message, 'err');
+        log('error', 'анализ: ' + e.message);
         if (window.console) console.error(e);
       }
       btn.disabled = false; btn.textContent = 'Проверить';
@@ -383,6 +423,7 @@
       }
     }).then(function (res) {
       downloadBlob(docxName(), res.blob);
+      log('action', 'скачал Word с пометками «' + docxName() + '»');
       var where = res.stats.mode === 'original'
         ? 'Оформление исходного файла сохранено полностью'
         : res.stats.mode === 'rebuilt'
@@ -391,6 +432,7 @@
       note('Готово: ' + res.stats.marks + ' пометок, ' + res.stats.comments + ' комментариев. ' + where + '.', 'ok');
     }).catch(function (err) {
       note('Не удалось собрать .docx: ' + (err && err.message ? err.message : err), 'err');
+      log('error', 'Word: ' + (err && err.message ? err.message : err));
       if (window.console) console.error(err);
     }).then(function () {
       btn.disabled = false; btn.textContent = old;
@@ -530,19 +572,23 @@
 
     $('#dl-json').onclick = function () {
       var base = (state.fileName || '').replace(/\.[a-z0-9]+$/i, '').trim().slice(0, 60) || stamp();
+      log('action', 'скачал JSON для нейросети');
       download('для нейросети — ' + base + '.json', Report.buildJson(state.text, state.report, state.generatedAt), 'application/json');
     };
     $('#dl-md').onclick = function () {
+      log('action', 'скачал отчёт Markdown');
       download('ai-report-' + stamp() + '.md', Report.buildMarkdown(state.text, state.report, state.generatedAt), 'text/markdown');
     };
     $('#dl-docx').onclick = function () { runDocxExport(this); };
     $('#copy-prompt').onclick = function () {
+      log('action', 'скопировал промпт для Claude');
       copyText(Report.buildClaudePrompt(state.report, true) + '\n\nТекст:\n' + state.text, this);
     };
     $('#dl-client').onclick = function () {
       var html = Report.buildClientHtml($('#results'), state.report, {
         fileName: state.fileName, generatedAt: state.generatedAt, threshold: readSettingsFromUi().threshold
       });
+      log('action', 'скачал отчёт для заказчика');
       download('отчёт-' + ((state.fileName || '').replace(/\.[a-z0-9]+$/i, '') || stamp()) + '.html', html, 'text/html');
     };
     Array.prototype.forEach.call(document.querySelectorAll('input[name="profile"]'), function (r) {
