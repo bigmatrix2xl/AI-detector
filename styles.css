@@ -542,3 +542,19 @@ mark.mk-bur { border-color: var(--mk-bur); } mark.mk-human { border-color: var(-
   .hl-text { padding: 16px; font-size: 15px; }
   .topbar .brand-sub { display: none; }
 }
+
+/* ---------- вход ---------- */
+html.auth-locked body > :not(#auth-gate) { display: none !important; }
+.auth-gate { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+.auth-card { width: min(400px, 100%); background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 28px; display: flex; flex-direction: column; }
+.auth-card .brand { margin-bottom: 24px; }
+.auth-card .field-label { margin-top: 12px; }
+.auth-card input { font: inherit; font-size: 16px; color: var(--ink); background: var(--surface-2);
+  border: 0; border-radius: 12px; padding: 12px 14px; width: 100%; }
+.auth-err { min-height: 1.55em; margin: 10px 0 6px; font-size: 14px; color: var(--bad-text); }
+.auth-card .pill { width: 100%; }
+.auth-card .field-hint { text-align: center; margin-top: 14px; }
+.auth-user { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; font-size: 13px; margin-right: 4px; }
+.auth-user span { color: var(--muted); font-size: 12px; }
+@media (max-width: 720px) { .auth-user { display: none; } }

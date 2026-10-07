@@ -50,6 +50,10 @@ const server = http.createServer((req, res) => {
   await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: +(process.env.W || 1600), height: 1000, deviceScaleFactor: 1, mobile: false });
   await send('Page.navigate', { url: `http://127.0.0.1:${port}/index.html` });
+  await sleep(800);
+  // замок входа: кладём сессию первого пользователя и перезагружаем
+  await evaluate(`(function(){var u=self.DetectorUsers[0];localStorage.setItem('aidet_auth',JSON.stringify({login:u.login,sig:u.hash.slice(0,16),until:Date.now()+36e5}));})()`);
+  await send('Page.reload');
   await sleep(1500);
   await evaluate(`(function(){var t=document.querySelector('#input-text');t.value=${JSON.stringify(TEXT)};t.dispatchEvent(new Event('input'));document.querySelector('#check-btn').click();})()`);
   // ждём, пока досчитаются смысловые повторы
